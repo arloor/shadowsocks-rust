@@ -68,6 +68,7 @@ default = [
     "local-socks4",
     "multi-threaded",
     "aead-cipher-2022",
+    "local-http-rustls",
 ]
 
 # Enable local server
@@ -195,6 +196,7 @@ rpmalloc = { version = "0.2", optional = true }
 shadowsocks-service = { version = "1.17.2", path = "./crates/shadowsocks-service" }
 
 windows-service = { version = "0.6", optional = true }
+httparse = "1.9.4"
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"

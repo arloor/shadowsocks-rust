@@ -149,6 +149,14 @@ pub fn define_command_line_options(mut app: Command) -> Command {
             .help("Server's password"),
     )
     .arg(
+        Arg::new("USE-HTTP-TUNNEL")
+            .long("use-http-tunnel")
+            .num_args(1)
+            .action(ArgAction::Set)
+            .requires("SERVER_ADDR")
+            .help("Use HTTP tunnel to communicate with server"),
+    )
+    .arg(
         Arg::new("ENCRYPT_METHOD")
             .short('m')
             .long("encrypt-method")
@@ -556,6 +564,9 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
                 .get_one::<String>("ENCRYPT_METHOD")
                 .map(|x| x.parse::<CipherKind>().expect("method"))
                 .expect("`method` is required");
+            let use_http_tunnel = matches
+                .get_one::<String>("USE-HTTP-TUNNEL")
+                .map_or(false, |x| x.parse::<bool>().expect("method"));
 
             let password = match matches.get_one::<String>("PASSWORD") {
                 Some(pwd) => read_variable_field_value(pwd).into(),
@@ -577,6 +588,7 @@ pub fn create(matches: &ArgMatches) -> Result<(Runtime, impl Future<Output = Exi
             let timeout = matches.get_one::<u64>("TIMEOUT").map(|x| Duration::from_secs(*x));
 
             let mut sc = ServerConfig::new(svr_addr, password, method);
+            sc.set_use_http_tunnel(use_http_tunnel);
             if let Some(timeout) = timeout {
                 sc.set_timeout(timeout);
             }

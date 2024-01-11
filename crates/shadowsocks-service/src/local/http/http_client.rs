@@ -11,8 +11,7 @@ use hyper::{
     body,
     client::conn::{http1, http2},
     http::uri::Scheme,
-    Request,
-    Response,
+    Request, Response,
 };
 use log::{error, trace};
 use lru_time_cache::LruCache;
@@ -53,7 +52,7 @@ impl HttpClient {
     pub async fn send_request(
         &self,
         context: Arc<ServiceContext>,
-        req: Request<body::Incoming>,
+        mut req: Request<body::Incoming>,
         balancer: &PingBalancer,
     ) -> Result<Response<body::Incoming>, HttpClientError> {
         let host = match host_addr(req.uri()) {
@@ -115,7 +114,7 @@ impl HttpClient {
         &self,
         host: Address,
         mut c: HttpConnection,
-        req: Request<body::Incoming>,
+        mut req: Request<body::Incoming>,
     ) -> hyper::Result<Response<body::Incoming>> {
         trace!("HTTP making request to host: {}, request: {:?}", host, req);
         let response = c.send_request(req).await?;
@@ -141,8 +140,8 @@ impl HttpClient {
 }
 
 enum HttpConnection {
-    Http1(http1::SendRequest<body::Incoming>),
-    Http2(http2::SendRequest<body::Incoming>),
+    Http1(http1::SendRequest<body::Incoming>, Option<String>),
+    Http2(http2::SendRequest<body::Incoming>, Option<String>),
 }
 
 impl HttpConnection {
@@ -179,6 +178,7 @@ impl HttpConnection {
             scheme
         );
 
+        let auth = stream.auth();
         let stream = ProxyHttpStream::connect_http(stream);
 
         // HTTP/1.x
@@ -198,7 +198,7 @@ impl HttpConnection {
             }
         });
 
-        Ok(HttpConnection::Http1(send_request))
+        Ok(HttpConnection::Http1(send_request, auth))
     }
 
     async fn connect_https(
@@ -208,7 +208,7 @@ impl HttpConnection {
         stream: AutoProxyClientStream,
     ) -> io::Result<HttpConnection> {
         trace!("HTTP making new TLS connection to host: {}, scheme: {}", host, scheme);
-
+        let auth = stream.auth();
         // TLS handshake, check alpn for h2 support.
         let stream = ProxyHttpStream::connect_https(stream, domain).await?;
 
@@ -229,7 +229,7 @@ impl HttpConnection {
                 }
             });
 
-            Ok(HttpConnection::Http2(send_request))
+            Ok(HttpConnection::Http2(send_request, auth))
         } else {
             // HTTP/1.x TLS
             let (send_request, connection) = match http1::Builder::new()
@@ -248,22 +248,32 @@ impl HttpConnection {
                 }
             });
 
-            Ok(HttpConnection::Http1(send_request))
+            Ok(HttpConnection::Http1(send_request, auth))
         }
     }
 
     #[inline]
-    pub async fn send_request(&mut self, req: Request<body::Incoming>) -> hyper::Result<Response<body::Incoming>> {
+    pub async fn send_request(&mut self, mut req: Request<body::Incoming>) -> hyper::Result<Response<body::Incoming>> {
         match self {
-            HttpConnection::Http1(r) => r.send_request(req).await,
-            HttpConnection::Http2(r) => r.send_request(req).await,
+            HttpConnection::Http1(r, auth) => {
+                if let Some(auth) = auth {
+                    req.headers_mut().insert("Proxy-Authorization", auth.parse().unwrap());
+                }
+                r.send_request(req).await
+            }
+            HttpConnection::Http2(r, auth) => {
+                if let Some(auth) = auth {
+                    req.headers_mut().insert("Proxy-Authorization", auth.parse().unwrap());
+                }
+                r.send_request(req).await
+            }
         }
     }
 
     pub fn is_closed(&self) -> bool {
         match self {
-            HttpConnection::Http1(r) => r.is_closed(),
-            HttpConnection::Http2(r) => r.is_closed(),
+            HttpConnection::Http1(r, _) => r.is_closed(),
+            HttpConnection::Http2(r, _) => r.is_closed(),
         }
     }
 }
