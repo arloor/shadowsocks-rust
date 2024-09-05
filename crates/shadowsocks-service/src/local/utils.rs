@@ -1,13 +1,10 @@
 //! Shadowsocks Local Utilities
 
-use std::{io, net::SocketAddr, time::Duration};
+use std::{io, net::SocketAddr};
 
 use log::{debug, trace};
 use shadowsocks::{config::ServerConfig, relay::socks5::Address};
-use tokio::{
-    io::{copy_bidirectional, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    time,
-};
+use tokio::io::{copy_bidirectional, AsyncRead, AsyncWrite};
 
 use crate::local::net::AutoProxyIo;
 
@@ -41,6 +38,10 @@ where
     // Wait at most 500ms, and then sends handshake packet to remote servers.
     #[cfg(not(feature = "https-tunnel"))]
     {
+        use std::time::Duration;
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::time;
         let mut buffer = [0u8; 8192];
         match time::timeout(Duration::from_millis(500), plain.read(&mut buffer)).await {
             Ok(Ok(0)) => {
