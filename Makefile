@@ -1,7 +1,7 @@
 PREFIX ?= /usr/local/bin
 TARGET ?= debug
 
-.PHONY: all build install uninstall clean
+.PHONY: all build install uninstall clean gh
 all: build
 
 build:
@@ -28,3 +28,6 @@ uninstall:
 
 clean:
 	cargo clean
+
+gh:
+	cargo install --path . --bin sslocal --features https-tunnel

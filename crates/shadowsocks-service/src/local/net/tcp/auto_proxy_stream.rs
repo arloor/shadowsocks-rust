@@ -53,48 +53,7 @@ pub struct HttpTunnelStream {
     addr: Address,
     auth: String,
 }
-// #[cfg(feature = "https-tunnel")]
-// static CONNECTOR: LazyLock<tokio_rustls::TlsConnector> = std::sync::LazyLock::new(|| {
-//     use log::warn;
-//     use once_cell::sync::Lazy;
-//     use std::sync::Arc;
-//     use tokio_rustls::{
-//         rustls::{ClientConfig, RootCertStore},
-//         TlsConnector,
-//     };
 
-//     static TLS_CONFIG: Lazy<Arc<ClientConfig>> = Lazy::new(|| {
-//         let mut config = ClientConfig::builder()
-//             .with_root_certificates(match rustls_native_certs::load_native_certs() {
-//                 Ok(certs) => {
-//                     let mut store = RootCertStore::empty();
-
-//                     for cert in certs {
-//                         if let Err(err) = store.add(cert) {
-//                             warn!("failed to add cert (native), error: {}", err);
-//                         }
-//                     }
-
-//                     store
-//                 }
-//                 Err(err) => {
-//                     warn!("failed to load native certs, {}, going to load from webpki-roots", err);
-
-//                     let mut store = RootCertStore::empty();
-//                     store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-//                     store
-//                 }
-//             })
-//             .with_no_client_auth();
-
-//         // Try to negotiate HTTP/2
-//         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-//         Arc::new(config)
-//     });
-
-//     TlsConnector::from(TLS_CONFIG.clone())
-// });
 #[cfg(feature = "https-tunnel")]
 impl HttpTunnelStream {
     pub async fn handshake(&mut self) -> io::Result<()> {

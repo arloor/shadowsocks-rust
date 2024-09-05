@@ -31,6 +31,10 @@ Related Projects:
 - [honwen/openwrt-shadowsocks-rust](https://github.com/honwen/openwrt-shadowsocks-rust) OpenWRT solution for `sslocal`, [discussion](https://github.com/honwen/openwrt-shadowsocks-rust)
 - [cg31/shadowsocks-windows-gui-rust](https://github.com/cg31/shadowsocks-windows-gui-rust) Windows GUI client, [discussion](https://github.com/shadowsocks/shadowsocks-rust/issues/375)
 
+## About this fork
+
+Add support for using an HTTP proxy over TLS as the server. Specifically, it aims to support the use of [rust_http_proxy](https://github.com/arloor/rust_http_proxy) as the backend server. Refer to [https-tunnel-readme.md](https-tunnel-readme.md) for more infomation.
+
 ## Build & Install
 
 ### Optional Features
