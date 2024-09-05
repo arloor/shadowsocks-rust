@@ -1,16 +1,10 @@
 //! Shadowsocks Local Utilities
 
-use std::{io, net::SocketAddr, time::Duration};
+use std::{io, net::SocketAddr};
 
 use log::{debug, trace};
-use shadowsocks::{
-    config::ServerConfig,
-    relay::{socks5::Address, tcprelay::utils::copy_encrypted_bidirectional},
-};
-use tokio::{
-    io::{copy_bidirectional, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    time,
-};
+use shadowsocks::{config::ServerConfig, relay::socks5::Address};
+use tokio::io::{copy_bidirectional, AsyncRead, AsyncWrite};
 
 use crate::local::net::AutoProxyIo;
 
@@ -42,7 +36,12 @@ where
     // Protocols like FTP, clients will wait for servers to send Welcome Message without sending anything.
     //
     // Wait at most 500ms, and then sends handshake packet to remote servers.
+    #[cfg(not(feature = "https-tunnel"))]
     {
+        use std::time::Duration;
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::time;
         let mut buffer = [0u8; 8192];
         match time::timeout(Duration::from_millis(500), plain.read(&mut buffer)).await {
             Ok(Ok(0)) => {
@@ -66,8 +65,12 @@ where
             }
         }
     }
-
-    match copy_encrypted_bidirectional(svr_cfg.method(), shadow, plain).await {
+    #[cfg(feature = "https-tunnel")]
+    let result = copy_bidirectional(shadow, plain).await;
+    #[cfg(not(feature = "https-tunnel"))]
+    let result =
+        shadowsocks::relay::tcprelay::utils::copy_encrypted_bidirectional(svr_cfg.method(), shadow, plain).await;
+    match result {
         Ok((wn, rn)) => {
             trace!(
                 "tcp tunnel {} <-> {} (proxied) closed, L2R {} bytes, R2L {} bytes",

@@ -6,10 +6,10 @@
 /dev
 /*.log
 /debian/*.log
-/.vscode
 /*.json
 /restart.sh
 /udp_echo_server.py
 /.idea
 /.devcontainer
 .DS_Store
+.vscode/launch.json

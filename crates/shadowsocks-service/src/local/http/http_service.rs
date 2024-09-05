@@ -98,6 +98,10 @@ impl HttpService {
                 host,
                 if stream.is_bypassed() { "bypassed" } else { "proxied" }
             );
+            if let Err(e) = stream.handshake_tunnel().await {
+                error!("failed to handshake with remote, error: {}", e);
+                return make_internal_server_error();
+            }
 
             let client_addr = self.peer_addr;
             tokio::spawn(async move {
