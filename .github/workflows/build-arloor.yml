@@ -37,4 +37,4 @@ jobs:
           fi
           git config --local user.email "admin@arloor.com"
           git config --local user.name "arloor"
-          gh release create ${version} ${{ steps.build.outputs.release_dir }}rust_http_proxy -n "$version" --latest -t "$version"
+          gh release create ${version} ${{ steps.build.outputs.release_dir }}sslocal -n "$version" --latest -t "$version"

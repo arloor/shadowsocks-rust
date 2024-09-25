@@ -2,6 +2,12 @@
 
 Add support for using an HTTP proxy over TLS as the server. Specifically, it aims to support the use of [rust_http_proxy](https://github.com/arloor/rust_http_proxy) as the backend server. Refer to [https-tunnel-readme.md](https-tunnel-readme.md) for more infomation.
 
+```bash
+curl -SLf https://us.arloor.dev/https://github.com/arloor/shadowsocks-rust/releases/download/latest/sslocal -o /tmp/sslocal
+install /tmp/sslocal /usr/bin/sslocal
+/usr/bin/sslocal -b localhost:1080 -k username:password -m aes-256-gcm -s localhost:7788 -v
+```
+
 # shadowsocks
 
 [![License](https://img.shields.io/github/license/zonyitoo/shadowsocks-rust.svg)](https://github.com/zonyitoo/shadowsocks-rust)
