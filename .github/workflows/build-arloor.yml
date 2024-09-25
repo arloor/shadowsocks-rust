@@ -1,0 +1,40 @@
+name: auto_release
+on:
+  push:
+    branches: [ "**"]
+  pull_request:
+    branches: [ "master" ]
+permissions:
+  contents: write
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  standard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set outputs
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short=8 HEAD)" >> $GITHUB_OUTPUT
+      - name: build
+        id: build
+        uses: arloor/rust_musl_action@latest
+        with:
+          use_musl: false
+          extra_deps: 
+          args: --bin sslocal --features https-tunnel
+          apt_mirror: mirrors.mit.edu
+          rust_flags: -C target-feature=+crt-static
+      - name: create master release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' 
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=latest
+          if $(gh release delete ${version} -y --cleanup-tag); 
+            then echo "delete old release"; 
+            else echo "no old release";
+          fi
+          git config --local user.email "admin@arloor.com"
+          git config --local user.name "arloor"
+          gh release create ${version} ${{ steps.build.outputs.release_dir }}rust_http_proxy -n "$version" --latest -t "$version"
