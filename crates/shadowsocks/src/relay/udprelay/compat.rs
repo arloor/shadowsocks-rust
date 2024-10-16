@@ -171,17 +171,17 @@ impl<'a, S: DatagramSend + ?Sized> Future for SendReadyFut<'a, S> {
 /// Extension methods for `DatagramReceive`
 pub trait DatagramReceiveExt: DatagramReceive {
     /// Async method for `poll_recv`
-    fn recv<'a, 'b>(&'a self, buf: &'a mut [u8]) -> RecvFut<'a, Self> {
+    fn recv<'a>(&'a self, buf: &'a mut [u8]) -> RecvFut<'a, Self> {
         RecvFut { io: self, buf }
     }
 
     /// Async method for `poll_recv_from`
-    fn recv_from<'a, 'b>(&'a self, buf: &'a mut [u8]) -> RecvFromFut<'a, Self> {
+    fn recv_from<'a>(&'a self, buf: &'a mut [u8]) -> RecvFromFut<'a, Self> {
         RecvFromFut { io: self, buf }
     }
 
     /// Async method for `poll_recv_ready`
-    fn recv_ready<'a>(&'a self) -> RecvReadyFut<'a, Self> {
+    fn recv_ready(&self) -> RecvReadyFut<'_, Self> {
         RecvReadyFut { io: self }
     }
 }
@@ -201,7 +201,7 @@ pub trait DatagramSendExt: DatagramSend {
     }
 
     /// Async method for `poll_send_ready`
-    fn send_ready<'a>(&'a self) -> SendReadyFut<'a, Self> {
+    fn send_ready(&self) -> SendReadyFut<'_, Self> {
         SendReadyFut { io: self }
     }
 }
