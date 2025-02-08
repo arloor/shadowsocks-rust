@@ -21,7 +21,7 @@ jobs:
         uses: arloor/rust_musl_action@latest
         with:
           use_musl: false
-          extra_deps: 
+          extra_deps: gcc
           args: --bin sslocal --features https-tunnel
           apt_mirror: mirrors.mit.edu
           rust_flags: -C target-feature=+crt-static
