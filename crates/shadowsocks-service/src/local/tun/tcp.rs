@@ -17,7 +17,7 @@ use std::{
 use log::{debug, error, trace};
 use shadowsocks::{net::TcpSocketOpts, relay::socks5::Address};
 use smoltcp::{
-    iface::{Config as InterfaceConfig, Interface, SocketHandle, SocketSet},
+    iface::{Config as InterfaceConfig, Interface, PollResult, SocketHandle, SocketSet},
     phy::{DeviceCapabilities, Medium},
     socket::tcp::{Socket as TcpSocket, SocketBuffer as TcpSocketBuffer, State as TcpState},
     storage::RingBuffer,
@@ -324,9 +324,7 @@ impl TcpTun {
                         }
 
                         let before_poll = SmolInstant::now();
-                        let updated_sockets = iface.poll(before_poll, device, &mut socket_set);
-
-                        if updated_sockets {
+                        if let PollResult::SocketStateChanged = iface.poll(before_poll, device, &mut socket_set) {
                             trace!("VirtDevice::poll costed {}", SmolInstant::now() - before_poll);
                         }
 
@@ -357,7 +355,10 @@ impl TcpTun {
                             }
 
                             // SHUT_WR
-                            if matches!(control.send_state, TcpSocketState::Close) {
+                            if matches!(control.send_state, TcpSocketState::Close)
+                                && socket.send_queue() == 0
+                                && control.send_buffer.is_empty()
+                            {
                                 trace!("closing TCP Write Half, {:?}", socket.state());
 
                                 // Close the socket. Set to FIN state
@@ -545,7 +546,7 @@ impl TcpTun {
 
     pub async fn drive_interface_state(&mut self, frame: &[u8]) {
         if self.iface_tx.send(frame.to_vec()).is_err() {
-            panic!("interface send channel closed unexpectly");
+            panic!("interface send channel closed unexpectedly");
         }
 
         // Wake up and poll the interface.
@@ -564,7 +565,7 @@ impl TcpTun {
 /// Established Client Transparent Proxy
 ///
 /// This method must be called after handshaking with client (for example, socks5 handshaking)
-async fn establish_client_tcp_redir<'a>(
+async fn establish_client_tcp_redir(
     context: Arc<ServiceContext>,
     balancer: PingBalancer,
     mut stream: TcpConnection,

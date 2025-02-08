@@ -28,9 +28,6 @@ use shadowsocks::{
     ServerConfig,
 };
 use tokio::{runtime::Handle, sync::mpsc, task::JoinHandle, time};
-#[cfg(windows)]
-#[allow(unused_imports)]
-use windows_sys::Win32::Networking::WinSock::WSAEAFNOSUPPORT;
 
 use crate::net::{
     packet_window::PacketWindowFilter, utils::to_ipv4_mapped, MonProxySocket, UDP_ASSOCIATION_KEEP_ALIVE_CHANNEL_SIZE,
@@ -116,9 +113,9 @@ impl UdpServer {
         }
 
         let assoc_map = match svr_cfg.method().category() {
-            CipherCategory::None | CipherCategory::Aead => {
-                NatMap::Association(create_assoc_map(time_to_live, capacity))
-            }
+            CipherCategory::None => NatMap::Association(create_assoc_map(time_to_live, capacity)),
+            #[cfg(feature = "aead-cipher")]
+            CipherCategory::Aead => NatMap::Association(create_assoc_map(time_to_live, capacity)),
             #[cfg(feature = "stream-cipher")]
             CipherCategory::Stream => NatMap::Association(create_assoc_map(time_to_live, capacity)),
             #[cfg(feature = "aead-cipher-2022")]
