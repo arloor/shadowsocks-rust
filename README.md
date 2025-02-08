@@ -8,6 +8,12 @@ install /tmp/sslocal /usr/bin/sslocal
 /usr/bin/sslocal -b localhost:1080 -k username:password -m aes-256-gcm -s localhost:7788 -v
 ```
 
+or
+
+```bash
+cargo install --path . --bin sslocal --features https-tunnel
+```
+
 # shadowsocks
 
 [![License](https://img.shields.io/github/license/zonyitoo/shadowsocks-rust.svg)](https://github.com/zonyitoo/shadowsocks-rust)
