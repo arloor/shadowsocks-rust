@@ -2,7 +2,7 @@
 
 use std::{future::Future, net::IpAddr, path::PathBuf, process::ExitCode, time::Duration};
 
-use clap::{builder::PossibleValuesParser, Arg, ArgAction, ArgGroup, ArgMatches, Command, ValueHint};
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command, ValueHint, builder::PossibleValuesParser};
 use futures::future::{self, Either};
 use log::{info, trace};
 use tokio::{
@@ -12,11 +12,11 @@ use tokio::{
 
 use shadowsocks_service::{
     acl::AccessControl,
-    config::{read_variable_field_value, Config, ConfigType, ManagerConfig, ServerInstanceConfig},
+    config::{Config, ConfigType, ManagerConfig, ServerInstanceConfig, read_variable_field_value},
     run_server,
     shadowsocks::{
         config::{ManagerAddr, Mode, ServerAddr, ServerConfig},
-        crypto::{available_ciphers, CipherKind},
+        crypto::{CipherKind, available_ciphers},
         plugin::PluginConfig,
     },
 };
@@ -280,7 +280,7 @@ pub fn define_command_line_options(mut app: Command) -> Command {
 }
 
 /// Create `Runtime` and `main` entry
-pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<Output = ShadowsocksResult>)> {
+pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<Output = ShadowsocksResult> + use<>)> {
     let (config, runtime) = {
         let config_path_opt = matches.get_one::<PathBuf>("CONFIG").cloned().or_else(|| {
             if !matches.contains_id("SERVER_CONFIG") {
@@ -418,10 +418,13 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         }
 
         if let Some(addr) = matches.get_one::<ManagerAddr>("MANAGER_ADDR").cloned() {
-            if let Some(ref mut manager_config) = config.manager {
-                manager_config.addr = addr;
-            } else {
-                config.manager = Some(ManagerConfig::new(addr));
+            match config.manager {
+                Some(ref mut manager_config) => {
+                    manager_config.addr = addr;
+                }
+                _ => {
+                    config.manager = Some(ManagerConfig::new(addr));
+                }
             }
         }
 
@@ -481,9 +484,12 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         // DONE READING options
 
         if config.server.is_empty() {
-            return Err(ShadowsocksError::InsufficientParams("missing proxy servers, consider specifying it by \
+            return Err(ShadowsocksError::InsufficientParams(
+                "missing proxy servers, consider specifying it by \
                     --server-addr, --encrypt-method, --password command line option, \
-                        or configuration file, check more details in https://shadowsocks.org/doc/configs.html".to_string()));
+                        or configuration file, check more details in https://shadowsocks.org/doc/configs.html"
+                    .to_string(),
+            ));
         }
 
         config
