@@ -22,8 +22,8 @@ pub enum ProxyHttpStream {
 }
 
 impl ProxyHttpStream {
-    pub fn connect_http(stream: AutoProxyClientStream) -> ProxyHttpStream {
-        ProxyHttpStream::Http(stream)
+    pub fn connect_http(stream: AutoProxyClientStream) -> Self {
+        Self::Http(stream)
     }
 
     #[cfg(feature = "local-http-native-tls")]
@@ -33,7 +33,7 @@ impl ProxyHttpStream {
         let cx = match TlsConnector::builder().request_alpns(&["h2", "http/1.1"]).build() {
             Ok(c) => c,
             Err(err) => {
-                return Err(io::Error::new(ErrorKind::Other, format!("tls build: {err}")));
+                return Err(io::Error::other(format!("tls build: {err}")));
             }
         };
         let cx = tokio_native_tls::TlsConnector::from(cx);
@@ -44,7 +44,7 @@ impl ProxyHttpStream {
                     Ok(Some(alpn)) => alpn == b"h2",
                     Ok(None) => false,
                     Err(err) => {
-                        let ierr = io::Error::new(ErrorKind::Other, format!("tls alpn negotiate: {err}"));
+                        let ierr = io::Error::other(format!("tls alpn negotiate: {err}"));
                         return Err(ierr);
                     }
                 };
@@ -52,24 +52,23 @@ impl ProxyHttpStream {
                 Ok(ProxyHttpStream::Https(s, negotiated_h2))
             }
             Err(err) => {
-                let ierr = io::Error::new(ErrorKind::Other, format!("tls connect: {err}"));
+                let ierr = io::Error::other(format!("tls connect: {err}"));
                 Err(ierr)
             }
         }
     }
 
     #[cfg(feature = "local-http-rustls")]
-    pub async fn connect_https(stream: AutoProxyClientStream, domain: &str) -> io::Result<ProxyHttpStream> {
+    pub async fn connect_https(stream: AutoProxyClientStream, domain: &str) -> io::Result<Self> {
         use log::warn;
-        use once_cell::sync::Lazy;
         use rustls_native_certs::CertificateResult;
-        use std::sync::Arc;
+        use std::sync::{Arc, LazyLock};
         use tokio_rustls::{
             TlsConnector,
             rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
         };
 
-        static TLS_CONFIG: Lazy<Arc<ClientConfig>> = Lazy::new(|| {
+        static TLS_CONFIG: LazyLock<Arc<ClientConfig>> = LazyLock::new(|| {
             let mut config = ClientConfig::builder()
                 .with_root_certificates({
                     // Load WebPKI roots (Mozilla's root certificates)
@@ -115,13 +114,12 @@ impl ProxyHttpStream {
         let (_, session) = tls_stream.get_ref();
         let negotiated_http2 = matches!(session.alpn_protocol(), Some(b"h2"));
 
-        Ok(ProxyHttpStream::Https(tls_stream, negotiated_http2))
+        Ok(Self::Https(tls_stream, negotiated_http2))
     }
 
     #[cfg(not(any(feature = "local-http-native-tls", feature = "local-http-rustls")))]
     pub async fn connect_https(_stream: AutoProxyClientStream, _domain: &str) -> io::Result<ProxyHttpStream> {
-        let err = io::Error::new(
-            ErrorKind::Other,
+        let err = io::Error::other(
             "https is not supported, consider enable it by feature \"local-http-native-tls\" or \"local-http-rustls\"",
         );
         Err(err)
@@ -129,9 +127,9 @@ impl ProxyHttpStream {
 
     pub fn negotiated_http2(&self) -> bool {
         match *self {
-            ProxyHttpStream::Http(..) => false,
+            Self::Http(..) => false,
             #[cfg(any(feature = "local-http-native-tls", feature = "local-http-rustls"))]
-            ProxyHttpStream::Https(_, n) => n,
+            Self::Https(_, n) => n,
         }
     }
 }

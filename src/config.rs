@@ -54,7 +54,8 @@ pub fn get_default_config_path(config_file: &str) -> Option<PathBuf> {
     // UNIX systems, XDG Base Directory
     // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
     #[cfg(unix)]
-    if let Ok(base_directories) = xdg::BaseDirectories::with_prefix("shadowsocks-rust") {
+    {
+        let base_directories = xdg::BaseDirectories::with_prefix("shadowsocks-rust");
         // $XDG_CONFIG_HOME/shadowsocks-rust/config.json
         // for dir in $XDG_CONFIG_DIRS; $dir/shadowsocks-rust/config.json
         for filename in &config_files {
@@ -67,12 +68,13 @@ pub fn get_default_config_path(config_file: &str) -> Option<PathBuf> {
     // UNIX global configuration file
     #[cfg(unix)]
     {
+        let mut global_config_path = PathBuf::from("/etc/shadowsocks-rust");
         for filename in &config_files {
-            let path_str = "/etc/shadowsocks-rust/".to_owned() + filename;
-            let global_config_path = Path::new(&path_str);
+            global_config_path.push(filename);
             if global_config_path.exists() {
                 return Some(global_config_path.to_path_buf());
             }
+            global_config_path.pop();
         }
     }
 
@@ -106,24 +108,24 @@ pub struct Config {
 
 impl Config {
     /// Load `Config` from file
-    pub fn load_from_file<P: AsRef<Path>>(filename: &P) -> Result<Config, ConfigError> {
+    pub fn load_from_file<P: AsRef<Path>>(filename: &P) -> Result<Self, ConfigError> {
         let filename = filename.as_ref();
 
         let mut reader = OpenOptions::new().read(true).open(filename)?;
         let mut content = String::new();
         reader.read_to_string(&mut content)?;
 
-        Config::load_from_str(&content)
+        Self::load_from_str(&content)
     }
 
     /// Load `Config` from string
-    pub fn load_from_str(s: &str) -> Result<Config, ConfigError> {
+    pub fn load_from_str(s: &str) -> Result<Self, ConfigError> {
         let ssconfig = json5::from_str(s)?;
-        Config::load_from_ssconfig(ssconfig)
+        Self::load_from_ssconfig(ssconfig)
     }
 
-    fn load_from_ssconfig(ssconfig: SSConfig) -> Result<Config, ConfigError> {
-        let mut config = Config::default();
+    fn load_from_ssconfig(ssconfig: SSConfig) -> Result<Self, ConfigError> {
+        let mut config = Self::default();
 
         #[cfg(feature = "logging")]
         if let Some(log) = ssconfig.log {
@@ -238,11 +240,11 @@ pub struct RuntimeModeError;
 impl FromStr for RuntimeMode {
     type Err = RuntimeModeError;
 
-    fn from_str(s: &str) -> Result<RuntimeMode, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "single_thread" => Ok(RuntimeMode::SingleThread),
+            "single_thread" => Ok(Self::SingleThread),
             #[cfg(feature = "multi-threaded")]
-            "multi_thread" => Ok(RuntimeMode::MultiThread),
+            "multi_thread" => Ok(Self::MultiThread),
             _ => Err(RuntimeModeError),
         }
     }

@@ -12,12 +12,12 @@ pub struct StorageMeta {
 }
 
 impl StorageMeta {
-    pub fn decode(v: &[u8]) -> io::Result<StorageMeta> {
-        bson::from_slice(v).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    pub fn decode(v: &[u8]) -> io::Result<Self> {
+        bson::from_slice(v).map_err(io::Error::other)
     }
 
     pub fn encode_to_vec(&self) -> io::Result<Vec<u8>> {
-        bson::to_vec(self).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        bson::to_vec(self).map_err(io::Error::other)
     }
 }
 
@@ -28,12 +28,12 @@ pub struct IpAddrMapping {
 }
 
 impl IpAddrMapping {
-    pub fn decode(v: &[u8]) -> io::Result<IpAddrMapping> {
-        bson::from_slice(v).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    pub fn decode(v: &[u8]) -> io::Result<Self> {
+        bson::from_slice(v).map_err(io::Error::other)
     }
 
     pub fn encode_to_vec(&self) -> io::Result<Vec<u8>> {
-        bson::to_vec(self).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        bson::to_vec(self).map_err(io::Error::other)
     }
 }
 
@@ -45,11 +45,11 @@ pub struct DomainNameMapping {
 }
 
 impl DomainNameMapping {
-    pub fn decode(v: &[u8]) -> io::Result<DomainNameMapping> {
-        bson::from_slice(v).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    pub fn decode(v: &[u8]) -> io::Result<Self> {
+        bson::from_slice(v).map_err(io::Error::other)
     }
 
     pub fn encode_to_vec(&self) -> io::Result<Vec<u8>> {
-        bson::to_vec(self).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        bson::to_vec(self).map_err(io::Error::other)
     }
 }

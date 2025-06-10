@@ -1,7 +1,7 @@
 //! Shadowsocks Local Server
 
 use std::{
-    io::{self, ErrorKind},
+    io,
     net::SocketAddr,
     sync::Arc,
     time::Duration,
@@ -94,7 +94,7 @@ pub struct Server {
 
 impl Server {
     /// Create a shadowsocks local server
-    pub async fn new(config: Config) -> io::Result<Server> {
+    pub async fn new(config: Config) -> io::Result<Self> {
         assert!(config.config_type == ConfigType::Local && !config.local.is_empty());
 
         trace!("{:?}", config);
@@ -130,6 +130,8 @@ impl Server {
         let mut connect_opts = ConnectOpts {
             #[cfg(any(target_os = "linux", target_os = "android"))]
             fwmark: config.outbound_fwmark,
+            #[cfg(target_os = "freebsd")]
+            user_cookie: config.outbound_user_cookie,
 
             #[cfg(target_os = "android")]
             vpn_protect_path: config.outbound_vpn_protect_path,
@@ -221,7 +223,7 @@ impl Server {
             balancer_builder.build().await?
         };
 
-        let mut local_server = Server {
+        let mut local_server = Self {
             balancer: balancer.clone(),
             socks_servers: Vec::new(),
             #[cfg(feature = "local-tunnel")]
@@ -276,7 +278,7 @@ impl Server {
                 ProtocolType::Socks => {
                     let client_addr = match local_config.addr {
                         Some(a) => a,
-                        None => return Err(io::Error::new(ErrorKind::Other, "socks requires local address")),
+                        None => return Err(io::Error::other("socks requires local address")),
                     };
 
                     let mut server_builder = SocksBuilder::with_context(context.clone(), client_addr, balancer);
@@ -312,7 +314,7 @@ impl Server {
                 ProtocolType::Tunnel => {
                     let client_addr = match local_config.addr {
                         Some(a) => a,
-                        None => return Err(io::Error::new(ErrorKind::Other, "tunnel requires local address")),
+                        None => return Err(io::Error::other("tunnel requires local address")),
                     };
 
                     let forward_addr = local_config.forward_addr.expect("tunnel requires forward address");
@@ -347,7 +349,7 @@ impl Server {
                 ProtocolType::Http => {
                     let client_addr = match local_config.addr {
                         Some(a) => a,
-                        None => return Err(io::Error::new(ErrorKind::Other, "http requires local address")),
+                        None => return Err(io::Error::other("http requires local address")),
                     };
 
                     #[allow(unused_mut)]
@@ -365,7 +367,7 @@ impl Server {
                 ProtocolType::Redir => {
                     let client_addr = match local_config.addr {
                         Some(a) => a,
-                        None => return Err(io::Error::new(ErrorKind::Other, "redir requires local address")),
+                        None => return Err(io::Error::other("redir requires local address")),
                     };
 
                     let mut server_builder = RedirBuilder::with_context(context.clone(), client_addr, balancer);
@@ -389,7 +391,7 @@ impl Server {
                 ProtocolType::Dns => {
                     let client_addr = match local_config.addr {
                         Some(a) => a,
-                        None => return Err(io::Error::new(ErrorKind::Other, "dns requires local address")),
+                        None => return Err(io::Error::other("dns requires local address")),
                     };
 
                     let mut server_builder = {
@@ -500,7 +502,7 @@ impl Server {
                 ProtocolType::FakeDns => {
                     let client_addr = match local_config.addr {
                         Some(a) => a,
-                        None => return Err(io::Error::new(ErrorKind::Other, "dns requires local address")),
+                        None => return Err(io::Error::other("dns requires local address")),
                     };
 
                     let mut builder = FakeDnsBuilder::new(client_addr);

@@ -26,15 +26,15 @@ impl<'a> TryFrom<&'a HeaderValue> for ContentEncoding {
 
     fn try_from(value: &'a HeaderValue) -> Result<Self, Self::Error> {
         if value == HeaderValue::from_static("identity") {
-            Ok(ContentEncoding::Identity)
+            Ok(Self::Identity)
         } else if value == HeaderValue::from_static("deflate") {
-            Ok(ContentEncoding::Deflate)
+            Ok(Self::Deflate)
         } else if value == HeaderValue::from_static("gzip") {
-            Ok(ContentEncoding::Gzip)
+            Ok(Self::Gzip)
         } else if value == HeaderValue::from_static("br") {
-            Ok(ContentEncoding::Br)
+            Ok(Self::Br)
         } else if value == HeaderValue::from_static("zstd") {
-            Ok(ContentEncoding::Zstd)
+            Ok(Self::Zstd)
         } else {
             Err(ContentEncodingError)
         }
@@ -54,7 +54,7 @@ where
     while let Some(data) = body_stream.next().await {
         match data {
             Ok(data) => raw_body.extend_from_slice(data.as_ref()),
-            Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
+            Err(err) => return Err(io::Error::other(err)),
         }
     }
 

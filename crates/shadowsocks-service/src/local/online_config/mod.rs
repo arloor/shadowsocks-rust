@@ -3,6 +3,7 @@
 //! Online Configuration Delivery URL (https://shadowsocks.org/doc/sip008.html)
 
 use std::{
+    collections::HashSet,
     io,
     sync::Arc,
     time::{Duration, Instant},
@@ -29,22 +30,37 @@ pub struct OnlineConfigServiceBuilder {
     config_url: String,
     balancer: PingBalancer,
     config_update_interval: Duration,
+    allowed_plugins: Option<HashSet<String>>,
 }
 
 impl OnlineConfigServiceBuilder {
     /// Create a Builder
-    pub fn new(context: Arc<ServiceContext>, config_url: String, balancer: PingBalancer) -> OnlineConfigServiceBuilder {
-        OnlineConfigServiceBuilder {
+    pub fn new(context: Arc<ServiceContext>, config_url: String, balancer: PingBalancer) -> Self {
+        Self {
             context,
             config_url,
             balancer,
             config_update_interval: Duration::from_secs(3600),
+            allowed_plugins: None,
         }
     }
 
     /// Set update interval. Default is 3600s
     pub fn set_update_interval(&mut self, update_interval: Duration) {
         self.config_update_interval = update_interval;
+    }
+
+    /// Allowed plugins (whitelist) from SIP008 server
+    pub fn set_allowed_plugins<V, S>(&mut self, allowed_plugins: V)
+    where
+        V: Iterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut allowed_plugins_set = HashSet::new();
+        for plugin in allowed_plugins {
+            allowed_plugins_set.insert(plugin.into());
+        }
+        self.allowed_plugins = Some(allowed_plugins_set);
     }
 
     /// Build OnlineConfigService
@@ -55,6 +71,7 @@ impl OnlineConfigServiceBuilder {
             config_url: self.config_url,
             config_update_interval: self.config_update_interval,
             balancer: self.balancer,
+            allowed_plugins: self.allowed_plugins,
         };
 
         // Run once after creation.
@@ -70,6 +87,7 @@ pub struct OnlineConfigService {
     config_url: String,
     config_update_interval: Duration,
     balancer: PingBalancer,
+    allowed_plugins: Option<HashSet<String>>,
 }
 
 impl OnlineConfigService {
@@ -98,7 +116,7 @@ impl OnlineConfigService {
             Ok(r) => r,
             Err(err) => {
                 error!("server-loader task failed to make hyper::Request, error: {}", err);
-                return Err(io::Error::new(io::ErrorKind::Other, err));
+                return Err(io::Error::other(err));
             }
         };
 
@@ -106,7 +124,7 @@ impl OnlineConfigService {
             Ok(r) => r,
             Err(err) => {
                 error!("server-loader task failed to get {}, error: {}", self.config_url, err);
-                return Err(io::Error::new(io::ErrorKind::Other, err));
+                return Err(io::Error::other(err));
             }
         };
 
@@ -121,8 +139,7 @@ impl OnlineConfigService {
                 self.config_url,
                 rsp.status()
             );
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 format!("status: {}", rsp.status()),
             ));
         }
@@ -164,7 +181,7 @@ impl OnlineConfigService {
                 Ok(ce) => ce,
                 Err(..) => {
                     error!("unrecognized Content-Encoding: {:?}", ce);
-                    return Err(io::Error::new(io::ErrorKind::Other, "unrecognized Content-Encoding"));
+                    return Err(io::Error::other("unrecognized Content-Encoding"));
                 }
             },
         };
@@ -172,7 +189,7 @@ impl OnlineConfigService {
         let body = read_body(content_encoding, &mut rsp).await?;
         let parsed_body = match String::from_utf8(body) {
             Ok(b) => b,
-            Err(..) => return Err(io::Error::new(io::ErrorKind::Other, "body contains non-utf8 bytes")),
+            Err(..) => return Err(io::Error::other("body contains non-utf8 bytes")),
         };
 
         let online_config = match Config::load_from_str(&parsed_body, ConfigType::OnlineConfig) {
@@ -182,7 +199,7 @@ impl OnlineConfigService {
                     "server-loader task failed to load from url: {}, error: {}",
                     self.config_url, err
                 );
-                return Err(io::Error::new(io::ErrorKind::Other, err));
+                return Err(io::Error::other(err));
             }
         };
 
@@ -191,10 +208,27 @@ impl OnlineConfigService {
                 "server-loader task failed to load from url: {}, error: {}",
                 self.config_url, err
             );
-            return Err(io::Error::new(io::ErrorKind::Other, err));
+            return Err(io::Error::other(err));
         }
 
         let after_read_time = Instant::now();
+
+        // Check plugin whitelist
+        if let Some(ref allowed_plugins) = self.allowed_plugins {
+            for server in &online_config.server {
+                if let Some(plugin) = server.config.plugin() {
+                    if !allowed_plugins.contains(&plugin.plugin) {
+                        error!(
+                            "server-loader task found not allowed plugin: {}, url: {}",
+                            plugin.plugin, self.config_url
+                        );
+                        return Err(io::Error::other(
+                            format!("not allowed plugin: {}", plugin.plugin),
+                        ));
+                    }
+                }
+            }
+        }
 
         // Merge with static servers
         let server_len = online_config.server.len();

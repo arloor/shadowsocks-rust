@@ -79,13 +79,13 @@ pub struct ManagerBuilder {
 
 impl ManagerBuilder {
     /// Create a new manager server builder from configuration
-    pub fn new(svr_cfg: ManagerConfig) -> ManagerBuilder {
-        ManagerBuilder::with_context(svr_cfg, Context::new_shared(ServerType::Server))
+    pub fn new(svr_cfg: ManagerConfig) -> Self {
+        Self::with_context(svr_cfg, Context::new_shared(ServerType::Server))
     }
 
     /// Create a new manager server builder with context and configuration
-    pub(crate) fn with_context(svr_cfg: ManagerConfig, context: SharedContext) -> ManagerBuilder {
-        ManagerBuilder {
+    pub(crate) fn with_context(svr_cfg: ManagerConfig, context: SharedContext) -> Self {
+        Self {
             context,
             svr_cfg,
             connect_opts: ConnectOpts::default(),
@@ -233,7 +233,7 @@ impl Manager {
         }
     }
 
-    /// Add a server programatically
+    /// Add a server programmatically
     pub async fn add_server(&self, svr_cfg: ServerConfig) {
         match self.svr_cfg.server_mode {
             ManagerServerMode::Builtin => self.add_server_builtin(svr_cfg).await,
@@ -386,6 +386,8 @@ impl Manager {
             acl: None, // Set with --acl command line argument
             #[cfg(any(target_os = "linux", target_os = "android"))]
             outbound_fwmark: None,
+            #[cfg(target_os = "freebsd")]
+            outbound_user_cookie: None,
             outbound_bind_addr: None,
             outbound_bind_interface: None,
             outbound_udp_allow_fragmentation: None,
@@ -538,8 +540,7 @@ impl Manager {
                             user.password
                         );
 
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
+                        return Err(io::Error::other(
                             "users[].password must be encoded with base64",
                         ));
                     }

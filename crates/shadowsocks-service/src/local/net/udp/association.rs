@@ -2,7 +2,7 @@
 
 use std::{
     cell::RefCell,
-    io::{self, ErrorKind},
+    io,
     marker::PhantomData,
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
@@ -68,7 +68,7 @@ where
         time_to_live: Option<Duration>,
         capacity: Option<usize>,
         balancer: PingBalancer,
-    ) -> (UdpAssociationManager<W>, Duration, mpsc::Receiver<SocketAddr>) {
+    ) -> (Self, Duration, mpsc::Receiver<SocketAddr>) {
         let time_to_live = time_to_live.unwrap_or(crate::DEFAULT_UDP_EXPIRY_DURATION);
         let assoc_map = match capacity {
             Some(capacity) => LruCache::with_expiry_duration_and_capacity(time_to_live, capacity),
@@ -78,7 +78,7 @@ where
         let (keepalive_tx, keepalive_rx) = mpsc::channel(UDP_ASSOCIATION_KEEP_ALIVE_CHANNEL_SIZE);
 
         (
-            UdpAssociationManager {
+            Self {
                 respond_writer,
                 context,
                 assoc_map,
@@ -162,7 +162,7 @@ where
         balancer: PingBalancer,
         respond_writer: W,
         server_session_expire_duration: Duration,
-    ) -> UdpAssociation<W> {
+    ) -> Self {
         let (assoc_handle, sender) = UdpAssociationContext::create(
             context,
             peer_addr,
@@ -171,7 +171,7 @@ where
             respond_writer,
             server_session_expire_duration,
         );
-        UdpAssociation {
+        Self {
             assoc_handle,
             sender,
             writer: PhantomData,
@@ -180,7 +180,7 @@ where
 
     fn try_send(&self, data: (Address, Bytes)) -> io::Result<()> {
         if self.sender.try_send(data).is_err() {
-            let err = io::Error::new(ErrorKind::Other, "udp relay channel full");
+            let err = io::Error::other("udp relay channel full");
             return Err(err);
         }
         Ok(())
@@ -198,8 +198,8 @@ struct ServerSessionContext {
 }
 
 impl ServerSessionContext {
-    fn new(session_expire_duration: Duration) -> ServerSessionContext {
-        ServerSessionContext {
+    fn new(session_expire_duration: Duration) -> Self {
+        Self {
             server_session_map: LruCache::with_expiry_duration(session_expire_duration),
         }
     }
@@ -265,7 +265,7 @@ where
         // being OOM.
         let (sender, receiver) = mpsc::channel(UDP_ASSOCIATION_SEND_CHANNEL_SIZE);
 
-        let mut assoc = UdpAssociationContext {
+        let mut assoc = Self {
             context,
             peer_addr,
             bypassed_ipv4_socket: None,
@@ -546,7 +546,7 @@ where
                 // Reopen a new session is not perfect, because the remote target will receive packets from a different address.
                 // For most application protocol, like QUIC, it is fine to change client address.
                 //
-                // But it will happen only when a client continously send 18446744073709551616 packets without renewing the socket.
+                // But it will happen only when a client continuously send 18446744073709551616 packets without renewing the socket.
 
                 let new_session_id = generate_client_session_id();
 

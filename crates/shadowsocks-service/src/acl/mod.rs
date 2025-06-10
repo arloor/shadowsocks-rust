@@ -7,16 +7,16 @@ use std::{
     collections::HashSet,
     fmt,
     fs::File,
-    io::{self, BufRead, BufReader, Error, ErrorKind},
+    io::{self, BufRead, BufReader, Error},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str,
+    sync::LazyLock,
 };
 
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use iprange::IpRange;
 use log::{trace, warn};
-use once_cell::sync::Lazy;
 use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use shadowsocks::{context::Context, relay::socks5::Address};
@@ -91,12 +91,12 @@ impl Rules {
         rule_regex: RegexSet,
         rule_set: HashSet<String>,
         rule_tree: SubDomainsTree,
-    ) -> Rules {
+    ) -> Self {
         // Optimization, merging networks
         ipv4.simplify();
         ipv6.simplify();
 
-        Rules {
+        Self {
             ipv4,
             ipv6,
             rule_regex,
@@ -167,7 +167,7 @@ struct ParsingRules {
 
 impl ParsingRules {
     fn new(name: &'static str) -> Self {
-        ParsingRules {
+        Self {
             name,
             ipv4: IpRange::new(),
             ipv6: IpRange::new(),
@@ -190,7 +190,7 @@ impl ParsingRules {
     }
 
     fn add_regex_rule(&mut self, mut rule: String) {
-        static TREE_SET_RULE_EQUIV: Lazy<Regex> = Lazy::new(|| {
+        static TREE_SET_RULE_EQUIV: LazyLock<Regex> = LazyLock::new(|| {
             RegexBuilder::new(
                 r#"^(?:(?:\((?:\?:)?\^\|\\\.\)|(?:\^\.(?:\+|\*))?\\\.)((?:[\w-]+(?:\\\.)?)+)|\^((?:[\w-]+(?:\\\.)?)+))\$?$"#,
             )
@@ -256,8 +256,7 @@ impl ParsingRules {
             // Remove the last `.` of FQDN
             Ok(str.trim_end_matches('.'))
         } else {
-            Err(Error::new(
-                ErrorKind::Other,
+            Err(Error::other(
                 format!("{} parsing error: Unicode not allowed here `{}`", self.name, str),
             ))
         }
@@ -269,7 +268,7 @@ impl ParsingRules {
             .size_limit(REGEX_SIZE_LIMIT)
             .unicode(false)
             .build()
-            .map_err(|err| Error::new(ErrorKind::Other, format!("{name} regex error: {err}")))
+            .map_err(|err| Error::other(format!("{name} regex error: {err}")))
     }
 
     fn into_rules(self) -> io::Result<Rules> {
@@ -343,7 +342,7 @@ pub struct AccessControl {
 
 impl AccessControl {
     /// Load ACL rules from a file
-    pub fn load_from_file<P: AsRef<Path>>(p: P) -> io::Result<AccessControl> {
+    pub fn load_from_file<P: AsRef<Path>>(p: P) -> io::Result<Self> {
         trace!("ACL loading from {:?}", p.as_ref());
 
         let file_path_ref = p.as_ref();
@@ -437,7 +436,7 @@ impl AccessControl {
             }
         }
 
-        Ok(AccessControl {
+        Ok(Self {
             outbound_block: outbound_block.into_rules()?,
             black_list: bypass.into_rules()?,
             white_list: proxy.into_rules()?,

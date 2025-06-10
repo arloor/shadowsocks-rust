@@ -1,6 +1,6 @@
 //! UDP relay client
 
-use std::io::{self, Cursor, ErrorKind};
+use std::io::{self, Cursor};
 
 use bytes::{BufMut, BytesMut};
 use tokio::net::{ToSocketAddrs, UdpSocket};
@@ -20,11 +20,11 @@ pub struct Socks5UdpClient {
 
 impl Socks5UdpClient {
     /// Create a new UDP associate client binds to a specific address
-    pub async fn bind<A>(addrs: A) -> io::Result<Socks5UdpClient>
+    pub async fn bind<A>(addrs: A) -> io::Result<Self>
     where
         A: ToSocketAddrs,
     {
-        Ok(Socks5UdpClient {
+        Ok(Self {
             socket: UdpSocket::bind(addrs).await?,
             assoc_client: None,
         })
@@ -36,7 +36,7 @@ impl Socks5UdpClient {
         P: ToSocketAddrs,
     {
         if self.assoc_client.is_some() {
-            let err = io::Error::new(ErrorKind::Other, "udp is associated");
+            let err = io::Error::other("udp is associated");
             return Err(err.into());
         }
 
@@ -95,7 +95,7 @@ impl Socks5UdpClient {
 
     fn check_associated(&self) -> io::Result<()> {
         if self.assoc_client.is_none() {
-            let err = io::Error::new(ErrorKind::Other, "udp not associated");
+            let err = io::Error::other("udp not associated");
             return Err(err);
         }
         Ok(())

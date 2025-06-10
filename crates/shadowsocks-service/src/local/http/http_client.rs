@@ -110,7 +110,7 @@ pub struct HttpClient<B> {
 
 impl<B> Clone for HttpClient<B> {
     fn clone(&self) -> Self {
-        HttpClient {
+        Self {
             cache_conn: self.cache_conn.clone(),
         }
     }
@@ -123,7 +123,7 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     fn default() -> Self {
-        HttpClient::new()
+        Self::new()
     }
 }
 
@@ -134,8 +134,8 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     /// Create a new HttpClient
-    pub fn new() -> HttpClient<B> {
-        HttpClient {
+    pub fn new() -> Self {
+        Self {
             cache_conn: Arc::new(Mutex::new(LruCache::with_expiry_duration(CONNECTION_EXPIRE_DURATION))),
         }
     }
@@ -265,7 +265,7 @@ where
         host: Address,
         domain: &str,
         balancer: Option<&PingBalancer>,
-    ) -> io::Result<HttpConnection<B>> {
+    ) -> io::Result<Self> {
         if *scheme != Scheme::HTTP && *scheme != Scheme::HTTPS {
             return Err(io::Error::new(ErrorKind::InvalidInput, "invalid scheme"));
         }
@@ -273,9 +273,9 @@ where
         let (stream, _) = connect_host(context, &host, balancer).await?;
 
         if *scheme == Scheme::HTTP {
-            HttpConnection::connect_http_http1(scheme, host, stream).await
+            Self::connect_http_http1(scheme, host, stream).await
         } else if *scheme == Scheme::HTTPS {
-            HttpConnection::connect_https(scheme, host, domain, stream).await
+            Self::connect_https(scheme, host, domain, stream).await
         } else {
             unreachable!()
         }
@@ -285,7 +285,7 @@ where
         scheme: &Scheme,
         host: Address,
         stream: AutoProxyClientStream,
-    ) -> io::Result<HttpConnection<B>> {
+    ) -> io::Result<Self> {
         trace!(
             "HTTP making new HTTP/1.1 connection to host: {}, scheme: {}",
             host, scheme
@@ -302,7 +302,7 @@ where
             .await
         {
             Ok(s) => s,
-            Err(err) => return Err(io::Error::new(ErrorKind::Other, err)),
+            Err(err) => return Err(io::Error::other(err)),
         };
 
         tokio::spawn(async move {
@@ -319,7 +319,7 @@ where
         host: Address,
         domain: &str,
         stream: AutoProxyClientStream,
-    ) -> io::Result<HttpConnection<B>> {
+    ) -> io::Result<Self> {
         trace!("HTTP making new TLS connection to host: {}, scheme: {}", host, scheme);
         let auth = stream.auth();
         // TLS handshake, check alpn for h2 support.
@@ -334,7 +334,7 @@ where
                 .await
             {
                 Ok(s) => s,
-                Err(err) => return Err(io::Error::new(ErrorKind::Other, err)),
+                Err(err) => return Err(io::Error::other(err)),
             };
 
             tokio::spawn(async move {
@@ -353,7 +353,7 @@ where
                 .await
             {
                 Ok(s) => s,
-                Err(err) => return Err(io::Error::new(ErrorKind::Other, err)),
+                Err(err) => return Err(io::Error::other(err)),
             };
 
             tokio::spawn(async move {

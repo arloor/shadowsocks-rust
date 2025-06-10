@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    io::{self, ErrorKind},
+    io,
     sync::Arc,
     time::Duration,
 };
@@ -34,13 +34,13 @@ pub struct ServerBuilder {
 
 impl ServerBuilder {
     /// Create a new server builder from configuration
-    pub fn new(svr_cfg: ServerConfig) -> ServerBuilder {
-        ServerBuilder::with_context(ServiceContext::new(), svr_cfg)
+    pub fn new(svr_cfg: ServerConfig) -> Self {
+        Self::with_context(ServiceContext::new(), svr_cfg)
     }
 
     /// Create a new server builder with context
-    fn with_context(context: ServiceContext, svr_cfg: ServerConfig) -> ServerBuilder {
-        ServerBuilder {
+    fn with_context(context: ServiceContext, svr_cfg: ServerConfig) -> Self {
+        Self {
             context,
             svr_cfg,
             udp_expiry_duration: None,
@@ -255,7 +255,7 @@ impl Server {
             error!("servers exited with error: {}", err);
         }
 
-        let err = io::Error::new(ErrorKind::Other, "server exited unexpectedly");
+        let err = io::Error::other("server exited unexpectedly");
         Err(err)
     }
 }

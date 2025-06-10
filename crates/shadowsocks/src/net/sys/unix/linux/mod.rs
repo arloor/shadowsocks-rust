@@ -1,5 +1,6 @@
 use std::{
-    io, mem,
+    io::{self, ErrorKind},
+    mem,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
     pin::Pin,
@@ -32,9 +33,9 @@ pub enum TcpStream {
 }
 
 impl TcpStream {
-    pub async fn connect(addr: SocketAddr, opts: &ConnectOpts) -> io::Result<TcpStream> {
+    pub async fn connect(addr: SocketAddr, opts: &ConnectOpts) -> io::Result<Self> {
         if opts.tcp.mptcp {
-            return TcpStream::connect_mptcp(addr, opts).await;
+            return Self::connect_mptcp(addr, opts).await;
         }
 
         let socket = match addr {
@@ -42,20 +43,20 @@ impl TcpStream {
             SocketAddr::V6(..) => TcpSocket::new_v6()?,
         };
 
-        TcpStream::connect_with_socket(socket, addr, opts).await
+        Self::connect_with_socket(socket, addr, opts).await
     }
 
-    async fn connect_mptcp(addr: SocketAddr, opts: &ConnectOpts) -> io::Result<TcpStream> {
+    async fn connect_mptcp(addr: SocketAddr, opts: &ConnectOpts) -> io::Result<Self> {
         let socket = create_mptcp_socket(&addr)?;
-        TcpStream::connect_with_socket(socket, addr, opts).await
+        Self::connect_with_socket(socket, addr, opts).await
     }
 
-    async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr, opts: &ConnectOpts) -> io::Result<TcpStream> {
+    async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr, opts: &ConnectOpts) -> io::Result<Self> {
         // Any traffic to localhost should not be protected
         // This is a workaround for VPNService
         #[cfg(target_os = "android")]
         if !addr.ip().is_loopback() {
-            use std::{io::ErrorKind, time::Duration};
+            use std::time::Duration;
             use tokio::time;
 
             if let Some(ref path) = opts.vpn_protect_path {
@@ -100,40 +101,40 @@ impl TcpStream {
             let stream = socket.connect(addr).await?;
             set_common_sockopt_after_connect(&stream, opts)?;
 
-            return Ok(TcpStream::Standard(stream));
+            return Ok(Self::Standard(stream));
         }
 
         let stream = TfoStream::connect_with_socket(socket, addr).await?;
         set_common_sockopt_after_connect(&stream, opts)?;
 
-        Ok(TcpStream::FastOpen(stream))
+        Ok(Self::FastOpen(stream))
     }
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         match *self {
-            TcpStream::Standard(ref s) => s.local_addr(),
-            TcpStream::FastOpen(ref s) => s.local_addr(),
+            Self::Standard(ref s) => s.local_addr(),
+            Self::FastOpen(ref s) => s.local_addr(),
         }
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         match *self {
-            TcpStream::Standard(ref s) => s.peer_addr(),
-            TcpStream::FastOpen(ref s) => s.peer_addr(),
+            Self::Standard(ref s) => s.peer_addr(),
+            Self::FastOpen(ref s) => s.peer_addr(),
         }
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
         match *self {
-            TcpStream::Standard(ref s) => s.nodelay(),
-            TcpStream::FastOpen(ref s) => s.nodelay(),
+            Self::Standard(ref s) => s.nodelay(),
+            Self::FastOpen(ref s) => s.nodelay(),
         }
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
         match *self {
-            TcpStream::Standard(ref s) => s.set_nodelay(nodelay),
-            TcpStream::FastOpen(ref s) => s.set_nodelay(nodelay),
+            Self::Standard(ref s) => s.set_nodelay(nodelay),
+            Self::FastOpen(ref s) => s.set_nodelay(nodelay),
         }
     }
 }
@@ -141,8 +142,8 @@ impl TcpStream {
 impl AsRawFd for TcpStream {
     fn as_raw_fd(&self) -> RawFd {
         match *self {
-            TcpStream::Standard(ref s) => s.as_raw_fd(),
-            TcpStream::FastOpen(ref s) => s.as_raw_fd(),
+            Self::Standard(ref s) => s.as_raw_fd(),
+            Self::FastOpen(ref s) => s.as_raw_fd(),
         }
     }
 }
@@ -287,7 +288,18 @@ pub fn set_disable_ip_fragmentation<S: AsRawFd>(af: AddrFamily, socket: &S) -> i
 pub async fn create_outbound_udp_socket(af: AddrFamily, config: &ConnectOpts) -> io::Result<UdpSocket> {
     let bind_addr = match (af, config.bind_local_addr) {
         (AddrFamily::Ipv4, Some(SocketAddr::V4(addr))) => addr.into(),
+        (AddrFamily::Ipv4, Some(SocketAddr::V6(addr))) => {
+            // Map IPv6 bind_local_addr to IPv4 if AF is IPv4
+            match addr.ip().to_ipv4_mapped() {
+                Some(addr) => SocketAddr::new(addr.into(), 0),
+                None => return Err(io::Error::new(ErrorKind::InvalidInput, "Invalid IPv6 address")),
+            }
+        }
         (AddrFamily::Ipv6, Some(SocketAddr::V6(addr))) => addr.into(),
+        (AddrFamily::Ipv6, Some(SocketAddr::V4(addr))) => {
+            // Map IPv4 bind_local_addr to IPv6 if AF is IPv6
+            SocketAddr::new(addr.ip().to_ipv6_mapped().into(), 0)
+        }
         (AddrFamily::Ipv4, ..) => SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0),
         (AddrFamily::Ipv6, ..) => SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0),
     };
@@ -320,7 +332,7 @@ pub async fn bind_outbound_udp_socket(bind_addr: &SocketAddr, config: &ConnectOp
     // This is a workaround for VPNService
     #[cfg(target_os = "android")]
     {
-        use std::{io::ErrorKind, time::Duration};
+        use std::time::Duration;
         use tokio::time;
 
         if let Some(ref path) = config.vpn_protect_path {
@@ -385,10 +397,7 @@ fn set_bindtodevice<S: AsRawFd>(socket: &S, iface: &str) -> io::Result<()> {
 
 cfg_if! {
     if #[cfg(target_os = "android")] {
-        use std::{
-            io::ErrorKind,
-            path::Path,
-        };
+        use std::path::Path;
         use tokio::io::AsyncReadExt;
 
         use super::uds::UnixStream;
@@ -411,7 +420,7 @@ cfg_if! {
             stream.read_exact(&mut response).await?;
 
             if response[0] == 0xFF {
-                return Err(io::Error::new(ErrorKind::Other, "protect() failed"));
+                return Err(io::Error::other("protect() failed"));
             }
 
             Ok(())

@@ -1,8 +1,11 @@
 //! A TCP listener for accepting shadowsocks' client connection
 
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{
+    io,
+    net::SocketAddr,
+    sync::{Arc, LazyLock},
+};
 
-use once_cell::sync::Lazy;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -26,12 +29,12 @@ pub struct ProxyListener {
     user_manager: Option<Arc<ServerUserManager>>,
 }
 
-static DEFAULT_ACCEPT_OPTS: Lazy<AcceptOpts> = Lazy::new(Default::default);
+static DEFAULT_ACCEPT_OPTS: LazyLock<AcceptOpts> = LazyLock::new(Default::default);
 
 impl ProxyListener {
     /// Create a `ProxyListener` binding to a specific address
-    pub async fn bind(context: SharedContext, svr_cfg: &ServerConfig) -> io::Result<ProxyListener> {
-        ProxyListener::bind_with_opts(context, svr_cfg, DEFAULT_ACCEPT_OPTS.clone()).await
+    pub async fn bind(context: SharedContext, svr_cfg: &ServerConfig) -> io::Result<Self> {
+        Self::bind_with_opts(context, svr_cfg, DEFAULT_ACCEPT_OPTS.clone()).await
     }
 
     /// Create a `ProxyListener` binding to a specific address with opts
@@ -39,7 +42,7 @@ impl ProxyListener {
         context: SharedContext,
         svr_cfg: &ServerConfig,
         accept_opts: AcceptOpts,
-    ) -> io::Result<ProxyListener> {
+    ) -> io::Result<Self> {
         let listener = match svr_cfg.tcp_external_addr() {
             ServerAddr::SocketAddr(sa) => TcpListener::bind_with_opts(sa, accept_opts).await?,
             ServerAddr::DomainName(domain, port) => {
@@ -49,12 +52,12 @@ impl ProxyListener {
                 .1
             }
         };
-        Ok(ProxyListener::from_listener(context, listener, svr_cfg))
+        Ok(Self::from_listener(context, listener, svr_cfg))
     }
 
     /// Create a `ProxyListener` from a `TcpListener`
-    pub fn from_listener(context: SharedContext, listener: TcpListener, svr_cfg: &ServerConfig) -> ProxyListener {
-        ProxyListener {
+    pub fn from_listener(context: SharedContext, listener: TcpListener, svr_cfg: &ServerConfig) -> Self {
+        Self {
             listener,
             method: svr_cfg.method(),
             key: svr_cfg.key().to_vec().into_boxed_slice(),
