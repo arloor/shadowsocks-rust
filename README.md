@@ -14,6 +14,12 @@ or
 cargo install --path . --bin sslocal --features https-tunnel
 ```
 
+测试：
+
+```bash
+curl https://www.arloor.com -x localhost:1080
+```
+
 # shadowsocks
 
 [![License](https://img.shields.io/github/license/zonyitoo/shadowsocks-rust.svg)](https://github.com/zonyitoo/shadowsocks-rust)
