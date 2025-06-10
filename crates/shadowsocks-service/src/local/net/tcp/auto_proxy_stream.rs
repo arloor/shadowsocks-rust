@@ -37,13 +37,13 @@ use {
     bytes::{BufMut, BytesMut},
     httparse::{Response, Status},
     log::warn,
-    once_cell::sync::Lazy,
     rustls_native_certs::CertificateResult,
     std::io::ErrorKind,
+    std::sync::LazyLock,
     tokio::io::{AsyncReadExt, AsyncWriteExt},
     tokio_rustls::{
-        rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
         TlsConnector,
+        rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
     },
 };
 #[cfg(feature = "https-tunnel")]
@@ -88,11 +88,7 @@ impl AutoProxyClientStream {
         }
     }
     /// Connect to target `addr` via shadowsocks' server configured by `svr_cfg`
-    pub async fn connect<A>(
-        context: Arc<ServiceContext>,
-        server: &ServerIdent,
-        addr: A,
-    ) -> io::Result<Self>
+    pub async fn connect<A>(context: Arc<ServiceContext>, server: &ServerIdent, addr: A) -> io::Result<Self>
     where
         A: Into<Address>,
     {
@@ -139,7 +135,7 @@ impl AutoProxyClientStream {
         )
         .await?;
 
-        static TLS_CONFIG: Lazy<Arc<ClientConfig>> = Lazy::new(|| {
+        static TLS_CONFIG: LazyLock<Arc<ClientConfig>> = LazyLock::new(|| {
             let mut config = ClientConfig::builder()
                 .with_root_certificates({
                     // Load WebPKI roots (Mozilla's root certificates)
@@ -182,6 +178,7 @@ impl AutoProxyClientStream {
         let tls_stream = connector
             .connect(host.to_owned(), MonProxyStream::from_stream(stream, flow_stat))
             .await?;
+
         use base64::Engine;
         let base64 = base64::engine::general_purpose::STANDARD.encode(server.server_config().password());
         Ok(AutoProxyClientStream::HttpTunnel(HttpTunnelStream {
@@ -220,16 +217,11 @@ impl AutoProxyClientStream {
     }
 
     /// Connect to target `addr` via shadowsocks' server configured by `svr_cfg`
-    pub async fn connect_proxied<A>(
-        context: Arc<ServiceContext>,
-        server: &ServerIdent,
-        addr: A,
-    ) -> io::Result<Self>
+    pub async fn connect_proxied<A>(context: Arc<ServiceContext>, server: &ServerIdent, addr: A) -> io::Result<Self>
     where
         A: Into<Address>,
     {
-        Self::connect_proxied_with_opts(context.clone(), server, addr, context.connect_opts_ref())
-            .await
+        Self::connect_proxied_with_opts(context.clone(), server, addr, context.connect_opts_ref()).await
     }
 
     /// Connect to target `addr` via shadowsocks' server configured by `svr_cfg`
