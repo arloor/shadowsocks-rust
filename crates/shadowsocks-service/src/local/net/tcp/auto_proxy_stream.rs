@@ -308,58 +308,36 @@ async fn connect_tunnel(
 }
 #[cfg(feature = "https-tunnel")]
 async fn wait_response(tls_stream: &mut tokio_rustls::client::TlsStream<MonProxyStream<TcpStream>>) -> io::Result<()> {
-    let mut buffer = BytesMut::with_capacity(4096); // 初始化BytesMut缓冲区
+    let mut reader = tokio::io::BufReader::new(tls_stream);
+
+    // 读取响应状态行
+    let mut response_line = String::new();
+    use tokio::io::{AsyncBufReadExt};
+    if let Err(e) = reader.read_line(&mut response_line).await {
+        warn!("forward_bypass read response error: {}", e);
+        return Err(io::Error::other(e));
+    }
+
+    // 检查响应是否是200
+    let status_code = response_line.split_whitespace().nth(1).unwrap_or("");
+    if status_code != "200" {
+        warn!("forward_bypass unexpected response: {}", response_line);
+        return Err(io::Error::other("unexpected response from bypass server"));
+    }
+
+    // 读取并丢弃响应头直到空行
     loop {
-        // 从流中读取数据
-        match tls_stream.read_buf(&mut buffer).await {
-            Ok(0) => {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected EOF"));
-            }
-            Ok(_) => {
-                // 尝试解析累积的数据
-                let mut headers = [httparse::EMPTY_HEADER; 400];
-                let mut response: Response<'_, '_> = Response::new(&mut headers);
-                match response.parse(&buffer) {
-                    Ok(Status::Complete(_)) => {
-                        match response.code {
-                            Some(200) => {
-                                // 连接成功
-                                return Ok(());
-                            }
-                            Some(code) => {
-                                // 连接失败
-                                return Err(io::Error::new(
-                                    io::ErrorKind::Other,
-                                    format!("failed to connect, response code: {}", code),
-                                ));
-                            }
-                            None => {
-                                // 无法解析响应码
-                                return Err(io::Error::new(
-                                    io::ErrorKind::Other,
-                                    "failed to connect, response code not found",
-                                ));
-                            }
-                        }
-                    }
-                    Ok(Status::Partial) => {
-                        // 请求不完整，继续读取更多数据
-                        println!("Received partial HTTP request, waiting for more data...");
-                        // 不清空缓冲区，继续累积数据
-                    }
-                    Err(e) => {
-                        // 解析错误
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, e));
-                    }
-                }
-            }
-            Err(e) => {
-                // 读取数据时出错
-                eprintln!("Failed to read from the stream: {:?}", e);
-                return Err(e);
-            }
+        let mut header_line = String::new();
+        if let Err(e) = reader.read_line(&mut header_line).await {
+            warn!("forward_bypass read header error: {}", e);
+            return Err(io::Error::other("unexpected response from bypass server"));
+        }
+        if header_line == "\r\n" || header_line == "\n" {
+            break;
         }
     }
+
+    Ok(())
 }
 
 impl AutoProxyIo for AutoProxyClientStream {

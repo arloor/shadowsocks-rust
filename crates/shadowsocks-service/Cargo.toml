@@ -79,7 +79,6 @@ https-tunnel = [
     "tokio-rustls",
     "webpki-roots",
     "rustls-native-certs",
-    "httparse",
     "base64",
 ]
 # Enable REDIR protocol for sslocal
