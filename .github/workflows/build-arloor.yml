@@ -24,7 +24,7 @@ jobs:
           extra_deps: gcc
           args: --bin sslocal --features https-tunnel
           apt_mirror: mirrors.mit.edu
-          rust_flags: -C target-feature=+crt-static
+          # rust_flags: -C target-feature=+crt-static
       - name: create master release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master' 
         env:
