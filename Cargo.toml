@@ -90,7 +90,7 @@ full = [
     "stream-cipher",
     "aead-cipher",
     "aead-cipher-2022",
-    "https-tunnel",        # arloor modified
+    # "https-tunnel",        # arloor modified
 ]
 
 # Full features with extra (non-stable)
