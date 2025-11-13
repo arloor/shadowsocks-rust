@@ -12,6 +12,7 @@ or
 
 ```bash
 cargo install --path . --bin sslocal --features https-tunnel
+cargo install --path . --bin ssserver
 ```
 
 测试：
