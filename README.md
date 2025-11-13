@@ -20,6 +20,14 @@ cargo install --path . --bin sslocal --features https-tunnel
 curl https://www.arloor.com -x localhost:1080
 ```
 
+合并上游
+
+```bash
+git fetch upstream
+git merge upstream/master
+# 然后解决冲突
+```
+
 # shadowsocks
 
 [![License](https://img.shields.io/github/license/zonyitoo/shadowsocks-rust.svg)](https://github.com/zonyitoo/shadowsocks-rust)
