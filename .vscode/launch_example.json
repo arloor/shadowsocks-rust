@@ -13,7 +13,7 @@
                 "--log-config",
                 "log4rs.yml",
                 "--local-addr",
-                "0.0.0.0:2080",
+                "0.0.0.0:1080",
                 "-k",
                 "username:password",
                 "-v",
@@ -23,7 +23,7 @@
                 "host:port"
             ],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "rust: cargo build",
+            "preLaunchTask": "cargo build https-tunnel",
             "env": {
                 "HOSTNAME": "test"
                 // "RUST_LOG": "debug"

@@ -12,12 +12,13 @@ or
 
 ```bash
 cargo install --path . --bin sslocal --features https-tunnel
+cargo install --path . --bin ssserver
 ```
 
 测试：
 
 ```bash
-curl https://www.arloor.com -x localhost:1080
+curl https://www.arloor.com/ip -x localhost:1080
 ```
 
 合并上游
