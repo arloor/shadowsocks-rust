@@ -29,7 +29,7 @@ use tokio::sync::Mutex;
 use crate::local::{
     context::ServiceContext,
     loadbalancing::PingBalancer,
-    net::{tcp::auto_proxy_stream::BasicAuth, AutoProxyClientStream},
+    net::{AutoProxyClientStream, tcp::auto_proxy_stream::BasicAuth},
 };
 
 use super::{
@@ -451,19 +451,19 @@ where
 
     #[cfg(feature = "https-tunnel")]
     #[inline]
-    pub async fn send_request(&mut self, mut req: Request<B>) -> hyper::Result<Response<body::Incoming>> {
+    pub async fn send_request(&mut self, mut req: Request<B>) -> Result<Response<body::Incoming>, SendRequestError<B>> {
         match self {
             HttpConnection::Http1(r, auth) => {
                 if let Some(auth) = &auth {
                     req.headers_mut().insert("Proxy-Authorization", auth.0.parse().unwrap());
                 }
-                r.send_request(req).await
+                r.try_send_request(req).await.map_err(Into::into)
             }
             HttpConnection::Http2(r, auth) => {
                 if let Some(auth) = &auth {
                     req.headers_mut().insert("Proxy-Authorization", auth.0.parse().unwrap());
                 }
-                r.send_request(req).await
+                r.try_send_request(req).await.map_err(Into::into)
             }
         }
     }
