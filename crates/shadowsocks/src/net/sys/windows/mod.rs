@@ -26,7 +26,7 @@ use tokio::{
 use tokio_tfo::TfoStream;
 use windows_sys::{
     Win32::{
-        Foundation::{BOOL, ERROR_BUFFER_OVERFLOW, ERROR_NO_DATA, ERROR_SUCCESS},
+        Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_NO_DATA, ERROR_SUCCESS, FALSE},
         NetworkManagement::IpHelper::{
             GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
             GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH, if_nametoindex,
@@ -37,11 +37,8 @@ use windows_sys::{
             WSAIoctl, htonl, setsockopt,
         },
     },
-    core::PCSTR,
+    core::{BOOL, PCSTR},
 };
-
-// BOOL values
-const FALSE: BOOL = 0;
 
 use crate::net::{
     AcceptOpts, AddrFamily, ConnectOpts, is_dual_stack_addr,
@@ -220,9 +217,7 @@ fn find_adapter_interface_index(addr: &SocketAddr, iface: &str) -> io::Result<Op
                 }
                 ERROR_NO_DATA => return Ok(None),
                 _ => {
-                    let err = io::Error::other(
-                        format!("GetAdaptersAddresses failed with error: {}", ret),
-                    );
+                    let err = io::Error::other(format!("GetAdaptersAddresses failed with error: {}", ret));
                     return Err(err);
                 }
             }
@@ -531,7 +526,7 @@ pub fn set_common_sockopt_after_connect<S: AsRawSocket>(stream: &S, opts: &Conne
 
 fn set_common_sockopt_after_connect_impl(socket: &Socket, opts: &ConnectOpts) -> io::Result<()> {
     if opts.tcp.nodelay {
-        socket.set_nodelay(true)?;
+        socket.set_tcp_nodelay(true)?;
     }
 
     if let Some(intv) = opts.tcp.keepalive {
@@ -555,7 +550,7 @@ fn set_common_sockopt_after_accept_impl(socket: &Socket, opts: &AcceptOpts) -> i
         socket.set_recv_buffer_size(buf_size as usize)?;
     }
 
-    socket.set_nodelay(opts.tcp.nodelay)?;
+    socket.set_tcp_nodelay(opts.tcp.nodelay)?;
 
     if let Some(intv) = opts.tcp.keepalive {
         let keepalive = TcpKeepalive::new().with_time(intv).with_interval(intv);

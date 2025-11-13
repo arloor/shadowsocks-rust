@@ -16,11 +16,11 @@ use http::{HeaderValue, Method as HttpMethod, Uri, Version as HttpVersion, heade
 use hyper::{
     Request, Response,
     body::{self, Body},
-    client::conn::{http1, http2},
+    client::conn::{TrySendError, http1, http2},
     http::uri::Scheme,
     rt::{Sleep, Timer},
 };
-use log::{error, trace};
+use log::{debug, error, trace};
 use lru_time_cache::LruCache;
 use pin_project::pin_project;
 use shadowsocks::relay::Address;
@@ -55,6 +55,16 @@ pub enum HttpClientError {
     /// Errors from http header
     #[error("{0}")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(thiserror::Error, Debug)]
+enum SendRequestError<B> {
+    #[error("{0}")]
+    Http(#[from] http::Error),
+
+    #[error("{0}")]
+    TrySend(#[from] TrySendError<Request<B>>),
 }
 
 #[derive(Clone, Debug)]
@@ -171,14 +181,40 @@ where
                 headers.insert("Host", host_value);
             }
         }
-        let req = Request::from_parts(req_parts, req_body);
+        let mut req = Request::from_parts(req_parts, req_body);
 
         // 1. Check if there is an available client
-        //
-        // FIXME: If the cached connection is closed unexpectedly, this request will fail immediately.
         if let Some(c) = self.get_cached_connection(&host).await {
             trace!("HTTP client for host: {} taken from cache", host);
-            return self.send_request_conn(host, c, req).await;
+            match self.send_request_conn(host.clone(), c, req).await {
+                Ok(response) => return Ok(response),
+                Err(SendRequestError::TrySend(mut err)) => {
+                    if let Some(inner_req) = err.take_message() {
+                        req = inner_req;
+
+                        // If TrySendError, the connection is probably broken, we should make a new connection
+                        debug!(
+                            "failed to send request via cached connection to host: {}, error: {}. retry with a new connection",
+                            host,
+                            err.error()
+                        );
+                    } else {
+                        error!(
+                            "failed to send request via cached connection to host: {}, error: {}. no request to retry",
+                            host,
+                            err.error()
+                        );
+                        return Err(err.into_error().into());
+                    }
+                }
+                Err(SendRequestError::Http(err)) => {
+                    error!(
+                        "failed to send request via cached connection to host: {}, error: {}",
+                        host, err
+                    );
+                    return Err(err.into());
+                }
+            }
         }
 
         // 2. If no. Make a new connection
@@ -200,7 +236,11 @@ where
             }
         };
 
-        self.send_request_conn(host, c, req).await
+        match self.send_request_conn(host, c, req).await {
+            Ok(response) => Ok(response),
+            Err(SendRequestError::TrySend(err)) => Err(err.into_error().into()),
+            Err(SendRequestError::Http(err)) => Err(err.into()),
+        }
     }
 
     async fn get_cached_connection(&self, host: &Address) -> Option<HttpConnection<B>> {
@@ -224,7 +264,7 @@ where
         host: Address,
         mut c: HttpConnection<B>,
         req: Request<B>,
-    ) -> Result<Response<body::Incoming>, HttpClientError> {
+    ) -> Result<Response<body::Incoming>, SendRequestError<B>> {
         trace!("HTTP making request to host: {}, request: {:?}", host, req);
         let response = c.send_request(req).await?;
         trace!("HTTP received response from host: {}, response: {:?}", host, response);
@@ -281,11 +321,7 @@ where
         }
     }
 
-    async fn connect_http_http1(
-        scheme: &Scheme,
-        host: Address,
-        stream: AutoProxyClientStream,
-    ) -> io::Result<Self> {
+    async fn connect_http_http1(scheme: &Scheme, host: Address, stream: AutoProxyClientStream) -> io::Result<Self> {
         trace!(
             "HTTP making new HTTP/1.1 connection to host: {}, scheme: {}",
             host, scheme
@@ -368,7 +404,7 @@ where
 
     #[cfg(not(feature = "https-tunnel"))]
     #[inline]
-    pub async fn send_request(&mut self, mut req: Request<B>) -> Result<Response<body::Incoming>, HttpClientError> {
+    pub async fn send_request(&mut self, mut req: Request<B>) -> Result<Response<body::Incoming>, SendRequestError<B>> {
         match self {
             HttpConnection::Http1(r, _) => {
                 if !matches!(
@@ -399,7 +435,7 @@ where
                     *(req.uri_mut()) = builder.build()?;
                 }
 
-                r.send_request(req).await.map_err(Into::into)
+                r.try_send_request(req).await.map_err(Into::into)
             }
             HttpConnection::Http2(r, _) => {
                 if !matches!(req.version(), HttpVersion::HTTP_2) {
@@ -408,7 +444,7 @@ where
                     *req.version_mut() = HttpVersion::HTTP_2;
                 }
 
-                r.send_request(req).await.map_err(Into::into)
+                r.try_send_request(req).await.map_err(Into::into)
             }
         }
     }

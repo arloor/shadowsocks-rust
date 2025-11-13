@@ -31,7 +31,7 @@ use super::hickory_dns_resolver::DnsResolver as HickoryDnsResolver;
 
 /// Abstract DNS resolver
 #[trait_variant::make(Send)]
-#[dynosaur::dynosaur(DynDnsResolve)]
+#[dynosaur::dynosaur(DynDnsResolve = dyn(box) DnsResolve, bridge(dyn))]
 pub trait DnsResolve {
     /// Resolves `addr:port` to a list of `SocketAddr`
     async fn resolve(&self, addr: &str, port: u16) -> io::Result<Vec<SocketAddr>>;
@@ -276,9 +276,7 @@ impl DnsResolver {
         connect_opts: ConnectOpts,
     ) -> io::Result<Self> {
         use super::hickory_dns_resolver::create_resolver;
-        Ok(Self::HickoryDns(
-            create_resolver(Some(dns), opts, connect_opts).await?,
-        ))
+        Ok(Self::HickoryDns(create_resolver(Some(dns), opts, connect_opts).await?))
     }
 
     /// Custom DNS resolver
@@ -286,7 +284,7 @@ impl DnsResolver {
     where
         R: DnsResolve + Send + Sync + 'static,
     {
-        Self::Custom(DynDnsResolve::boxed(custom))
+        Self::Custom(DynDnsResolve::new_box(custom))
     }
 
     /// Resolve address into `SocketAddr`s

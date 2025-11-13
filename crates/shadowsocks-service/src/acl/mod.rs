@@ -256,9 +256,10 @@ impl ParsingRules {
             // Remove the last `.` of FQDN
             Ok(str.trim_end_matches('.'))
         } else {
-            Err(Error::other(
-                format!("{} parsing error: Unicode not allowed here `{}`", self.name, str),
-            ))
+            Err(Error::other(format!(
+                "{} parsing error: Unicode not allowed here `{}`",
+                self.name, str
+            )))
         }
     }
 
@@ -304,23 +305,26 @@ impl ParsingRules {
 /// Available sections are
 ///
 /// - For local servers (`sslocal`, `ssredir`, ...)
-///     * `[bypass_all]` - ACL runs in `BlackList` mode.
-///     * `[proxy_all]` - ACL runs in `WhiteList` mode.
+///     * `[bypass_all]` - ACL runs in `WhiteList` mode.
+///     * `[proxy_all]` - ACL runs in `BlackList` mode.
 ///     * `[bypass_list]` - Rules for connecting directly
 ///     * `[proxy_list]` - Rules for connecting through proxies
 /// - For remote servers (`ssserver`)
-///     * `[reject_all]` - ACL runs in `BlackList` mode.
-///     * `[accept_all]` - ACL runs in `WhiteList` mode.
+///     * `[reject_all]` - ACL runs in `WhiteList` mode.
+///     * `[accept_all]` - ACL runs in `BlackList` mode.
 ///     * `[black_list]` - Rules for rejecting
 ///     * `[white_list]` - Rules for allowing
+///     * `[outbound_block_all]` - ACL runs in `WhiteList` mode for outbound addresses.
+///     * `[outbound_allow_all]` - ACL runs in `BlackList` mode for outbound addresses.
 ///     * `[outbound_block_list]` - Rules for blocking outbound addresses.
+///     * `[outbound_allow_list]` - Rules for allowing outbound addresses.
 ///
 /// ## Mode
 ///
 /// Mode is the default ACL strategy for those addresses that are not in configuration file.
 ///
-/// - `BlackList` - Bypasses / Rejects all addresses except those in `[proxy_list]` or `[white_list]`
-/// - `WhiteList` - Proxies / Accepts all addresses except those in `[bypass_list]` or `[black_list]`
+/// - `WhiteList` - Bypasses / Rejects all addresses except those in `[proxy_list]` or `[white_list]`
+/// - `BlackList` - Proxies / Accepts all addresses except those in `[bypass_list]` or `[black_list]`
 ///
 /// ## Rules
 ///
@@ -334,9 +338,11 @@ impl ParsingRules {
 #[derive(Debug, Clone)]
 pub struct AccessControl {
     outbound_block: Rules,
+    outbound_allow: Rules,
     black_list: Rules,
     white_list: Rules,
     mode: Mode,
+    outbound_mode: Mode,
     file_path: PathBuf,
 }
 
@@ -352,8 +358,10 @@ impl AccessControl {
         let r = BufReader::new(fp);
 
         let mut mode = Mode::BlackList;
+        let mut outbound_mode = Mode::BlackList;
 
         let mut outbound_block = ParsingRules::new("[outbound_block_list]");
+        let mut outbound_allow = ParsingRules::new("[outbound_allow_list]");
         let mut bypass = ParsingRules::new("[black_list] or [bypass_list]");
         let mut proxy = ParsingRules::new("[white_list] or [proxy_list]");
         let mut curr = &mut bypass;
@@ -397,9 +405,21 @@ impl AccessControl {
                     mode = Mode::BlackList;
                     trace!("switch to mode {:?}", mode);
                 }
+                "[outbound_block_all]" => {
+                    outbound_mode = Mode::WhiteList;
+                    trace!("switch to outbound_mode {:?}", outbound_mode);
+                }
+                "[outbound_allow_all]" => {
+                    outbound_mode = Mode::BlackList;
+                    trace!("switch to outbound_mode {:?}", outbound_mode);
+                }
                 "[outbound_block_list]" => {
                     curr = &mut outbound_block;
                     trace!("loading outbound_block_list");
+                }
+                "[outbound_allow_list]" => {
+                    curr = &mut outbound_allow;
+                    trace!("loading outbound_allow_list");
                 }
                 "[black_list]" | "[bypass_list]" => {
                     curr = &mut bypass;
@@ -438,9 +458,11 @@ impl AccessControl {
 
         Ok(Self {
             outbound_block: outbound_block.into_rules()?,
+            outbound_allow: outbound_allow.into_rules()?,
             black_list: bypass.into_rules()?,
             white_list: proxy.into_rules()?,
             mode,
+            outbound_mode,
             file_path,
         })
     }
@@ -482,24 +504,28 @@ impl AccessControl {
     }
 
     /// If there are no IP rules
+    #[inline]
     pub fn is_ip_empty(&self) -> bool {
-        match self.mode {
-            Mode::BlackList => self.black_list.is_ip_empty(),
-            Mode::WhiteList => self.white_list.is_ip_empty(),
-        }
+        self.black_list.is_ip_empty() && self.white_list.is_ip_empty()
     }
 
     /// If there are no domain name rules
+    #[inline]
     pub fn is_host_empty(&self) -> bool {
         self.black_list.is_host_empty() && self.white_list.is_host_empty()
     }
 
     /// Check if `IpAddr` should be proxied
     pub fn check_ip_in_proxy_list(&self, ip: &IpAddr) -> bool {
-        match self.mode {
-            Mode::BlackList => !self.black_list.check_ip_matched(ip),
-            Mode::WhiteList => self.white_list.check_ip_matched(ip),
+        if self.black_list.check_ip_matched(ip) {
+            // If IP is in black_list, it should be bypassed
+            return false;
         }
+        if self.white_list.check_ip_matched(ip) {
+            // If IP is in white_list, it should be proxied
+            return true;
+        }
+        self.is_default_in_proxy_list()
     }
 
     /// Default mode
@@ -507,6 +533,7 @@ impl AccessControl {
     /// Default behavior for hosts that are not configured
     /// - `true` - Proxied
     /// - `false` - Bypassed
+    #[inline]
     pub fn is_default_in_proxy_list(&self) -> bool {
         match self.mode {
             Mode::BlackList => true,
@@ -516,7 +543,7 @@ impl AccessControl {
 
     /// Returns the ASCII representation a domain name,
     /// if conversion fails returns original string
-    fn convert_to_ascii(host: &str) -> Cow<str> {
+    fn convert_to_ascii(host: &str) -> Cow<'_, str> {
         idna::domain_to_ascii(host)
             .map(From::from)
             .unwrap_or_else(|_| host.into())
@@ -533,17 +560,28 @@ impl AccessControl {
                 if let Some(value) = self.check_host_in_proxy_list(host) {
                     return !value;
                 }
-                if self.is_ip_empty() {
+
+                // If mode is BlackList, host is proxied by default. If it has any resolved IPs in black_list, then it should be bypassed.
+                // If mode is WhiteList, host is bypassed by default. If it has any resolved IPs in white_list, then it should be proxied.
+                let (check_list, bypass_if_matched) = match self.mode {
+                    Mode::BlackList => (&self.black_list, true),
+                    Mode::WhiteList => (&self.white_list, false),
+                };
+
+                if check_list.is_ip_empty() {
                     return !self.is_default_in_proxy_list();
                 }
+
                 if let Ok(vaddr) = context.dns_resolve(host, port).await {
                     for addr in vaddr {
-                        if !self.check_ip_in_proxy_list(&addr.ip()) {
-                            return true;
+                        let ip = addr.ip();
+                        if check_list.check_ip_matched(&ip) {
+                            return bypass_if_matched;
                         }
                     }
                 }
-                false
+
+                !self.is_default_in_proxy_list()
             }
         }
     }
@@ -556,7 +594,7 @@ impl AccessControl {
                 self.black_list.check_ip_matched(&addr.ip())
             }
             Mode::WhiteList => {
-                // Only clients in white_list will be proxied
+                // Only clients not in white_list will be blocked
                 !self.white_list.check_ip_matched(&addr.ip())
             }
         }
@@ -568,22 +606,63 @@ impl AccessControl {
     ///       resolved addresses are checked in the `lookup_outbound_then!` macro
     pub async fn check_outbound_blocked(&self, context: &Context, outbound: &Address) -> bool {
         match outbound {
-            Address::SocketAddress(saddr) => self.outbound_block.check_ip_matched(&saddr.ip()),
+            Address::SocketAddress(saddr) => self.check_outbound_ip_blocked(&saddr.ip()),
             Address::DomainNameAddress(host, port) => {
-                if self.outbound_block.check_host_matched(&Self::convert_to_ascii(host)) {
-                    return true;
+                let ascii_host = Self::convert_to_ascii(host);
+                if self.outbound_block.check_host_matched(&ascii_host) {
+                    return true; // Blocked by config
+                }
+                if self.outbound_allow.check_host_matched(&ascii_host) {
+                    return false; // Allowed by config
+                }
+
+                // If no domain name rules matched,
+                // we need to resolve the hostname to IP addresses
+
+                // If mode is BlackList, host is allowed by default. If any of its' resolved IPs in outboud_block, then it is blocked.
+                // If mode is WhiteList, host is blocked by default. If any of its' resolved IPs in outbound_allow, then it is allowed.
+                let (check_rule, block_if_matched) = match self.outbound_mode {
+                    Mode::BlackList => (&self.outbound_block, true),
+                    Mode::WhiteList => (&self.outbound_allow, false),
+                };
+
+                if check_rule.is_ip_empty() {
+                    // If there are no IP rules, use the default mode
+                    return self.is_outbound_default_blocked();
                 }
 
                 if let Ok(vaddr) = context.dns_resolve(host, *port).await {
                     for addr in vaddr {
-                        if self.outbound_block.check_ip_matched(&addr.ip()) {
-                            return true;
+                        let ip = addr.ip();
+                        if check_rule.check_ip_matched(&ip) {
+                            return block_if_matched;
                         }
                     }
                 }
 
-                false
+                self.is_outbound_default_blocked()
             }
+        }
+    }
+
+    fn check_outbound_ip_blocked(&self, ip: &IpAddr) -> bool {
+        if self.outbound_block.check_ip_matched(ip) {
+            // If IP is in outbound_block, it should be blocked
+            return true;
+        }
+        if self.outbound_allow.check_ip_matched(ip) {
+            // If IP is in outbound_allow, it should be allowed
+            return false;
+        }
+        // If IP is not in any list, check the default mode
+        self.is_outbound_default_blocked()
+    }
+
+    #[inline]
+    fn is_outbound_default_blocked(&self) -> bool {
+        match self.outbound_mode {
+            Mode::BlackList => false,
+            Mode::WhiteList => true,
         }
     }
 }

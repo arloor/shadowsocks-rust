@@ -1,6 +1,6 @@
 [package]
 name = "shadowsocks"
-version = "1.23.1"
+version = "1.23.2"
 authors = ["Shadowsocks Contributors"]
 description = "shadowsocks is a fast tunnel proxy that helps you bypass firewalls."
 repository = "https://github.com/shadowsocks/shadowsocks-rust"
@@ -71,9 +71,10 @@ percent-encoding = "2.1"
 
 futures = "0.3"
 trait-variant = "0.1"
-dynosaur = "0.2.0"
+dynosaur = "0.3.0"
+sealed = "0.6"
 
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1.9.0", features = [
     "io-util",
     "macros",
@@ -94,10 +95,10 @@ blake3 = "1.5"
 shadowsocks-crypto = { version = "0.6.0", default-features = false }
 
 [target.'cfg(any(windows, target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos"))'.dependencies]
-tokio-tfo = "0.3"
+tokio-tfo = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
@@ -110,3 +111,6 @@ sendfd = { version = "0.4", features = ["tokio"] }
 
 [dev-dependencies]
 env_logger = "0.11"
+
+[lints.clippy]
+uninlined_format_args = "allow"
