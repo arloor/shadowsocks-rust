@@ -9,6 +9,33 @@
 				"${workspaceFolderBasename}",
 				"--bin",
 				"sslocal",
+				"--features",
+				"https-tunnel"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build"
+			},
+			"label": "cargo build https-tunnel",
+			"presentation": {
+				"echo": true,
+				"reveal": "silent",
+				"focus": false,
+				"panel": "shared",
+				"showReuseMessage": true,
+				"clear": false
+			}
+		},
+		{
+			"type": "cargo",
+			"command": "build",
+			"args": [
+				"--package",
+				"${workspaceFolderBasename}",
+				"--bin",
+				"sslocal",
 				// "--features",
 				// "https-tunnel"
 			],
@@ -18,7 +45,7 @@
 			"group": {
 				"kind": "build"
 			},
-			"label": "rust: cargo build",
+			"label": "cargo build",
 			"presentation": {
 				"echo": true,
 				"reveal": "silent",
