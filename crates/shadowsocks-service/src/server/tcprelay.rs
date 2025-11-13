@@ -8,7 +8,10 @@ use std::{
     time::Duration,
 };
 
+use io_x::CounterIO;
 use log::{debug, error, info, trace, warn};
+use prom_label::LabelImpl;
+use prometheus_client::encoding::EncodeLabelSet;
 use shadowsocks::{
     ProxyListener, ServerConfig,
     crypto::CipherKind,
@@ -21,7 +24,10 @@ use tokio::{
     time,
 };
 
-use crate::net::{MonProxyStream, utils::ignore_until_end};
+use crate::{
+    net::{MonProxyStream, utils::ignore_until_end},
+    server::{AccessLabel, METRICS},
+};
 
 use super::context::ServiceContext;
 
@@ -255,7 +261,19 @@ impl TcpServerClient {
             self.context.connect_opts_ref()
         );
 
-        match copy_encrypted_bidirectional(self.method, &mut self.stream, &mut remote_stream).await {
+        let access_label = AccessLabel {
+            client: self.peer_addr.ip().to_canonical().to_string(),
+            target: target_addr.to_string(),
+            username: "ss-user".to_string(),
+            relay_over_tls: None,
+        };
+        let mut dst_stream = CounterIO::new(
+            remote_stream,
+            METRICS.proxy_traffic.clone(),
+            LabelImpl::new(access_label),
+        );
+
+        match copy_encrypted_bidirectional(self.method, &mut self.stream, &mut dst_stream).await {
             Ok((rn, wn)) => {
                 trace!(
                     "tcp tunnel {} <-> {} closed, L2R {} bytes, R2L {} bytes",

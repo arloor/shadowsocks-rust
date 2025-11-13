@@ -26,7 +26,9 @@ use crate::logging;
 use crate::{
     config::{Config as ServiceConfig, RuntimeMode},
     error::{ShadowsocksError, ShadowsocksResult},
-    monitor, vparser,
+    monitor,
+    service::prom_exporter::{self, prom_exporter},
+    vparser,
 };
 
 /// Defines command line options
@@ -534,11 +536,28 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
     let main_fut = async move {
         let abort_signal = monitor::create_signal_monitor();
         let server = run_server(config);
+        let prom_exporter = prom_exporter(9323);
 
         tokio::pin!(abort_signal);
         tokio::pin!(server);
+        tokio::pin!(prom_exporter);
+        let join = async {
+            match future::select(server, abort_signal).await {
+                // Server future resolved without an error. This should never happen.
+                Either::Left((Ok(..), ..)) => Err(ShadowsocksError::ServerExitUnexpectedly(
+                    "server exited unexpectedly".to_owned(),
+                )),
+                // Server future resolved with error, which are listener errors in most cases
+                Either::Left((Err(err), ..)) => {
+                    Err(ShadowsocksError::ServerAborted(format!("server aborted with {err}")))
+                }
+                // The abort signal future resolved. Means we should just exit.
+                Either::Right(_) => Ok(()),
+            }
+        };
+        tokio::pin!(join);
 
-        match future::select(server, abort_signal).await {
+        match future::select(join, prom_exporter).await {
             // Server future resolved without an error. This should never happen.
             Either::Left((Ok(..), ..)) => Err(ShadowsocksError::ServerExitUnexpectedly(
                 "server exited unexpectedly".to_owned(),

@@ -205,6 +205,9 @@ json5 = "0.4"
 bson = { version = "3.0.0", features = ["serde"], optional = true }
 
 shadowsocks = { version = "1.23.2", path = "../shadowsocks", default-features = false }
+prometheus-client = { version = "0.24" }
+prom_label = { git = "https://github.com/arloor/rust_http_proxy", branch = "master" }
+io_x = { git = "https://github.com/arloor/rust_http_proxy", branch = "master" }
 
 # Just for the ioctl call macro
 [target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd"))'.dependencies]

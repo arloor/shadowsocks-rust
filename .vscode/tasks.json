@@ -9,8 +9,8 @@
 				"${workspaceFolderBasename}",
 				"--bin",
 				"sslocal",
-				"--features",
-				"https-tunnel"
+				// "--features",
+				// "https-tunnel"
 			],
 			"problemMatcher": [
 				"$rustc"

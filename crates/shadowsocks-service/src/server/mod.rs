@@ -1,9 +1,20 @@
 //! Shadowsocks server
 
-use std::{io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    io,
+    net::SocketAddr,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use futures::future;
-use log::trace;
+use log::{info, trace};
+use prom_label::{Label, LabelImpl};
+use prometheus_client::{
+    encoding::EncodeLabelSet,
+    metrics::{counter::Counter, family::Family},
+    registry::Registry,
+};
 use shadowsocks::net::{AcceptOpts, ConnectOpts, UdpSocketOpts};
 
 use crate::{
@@ -186,4 +197,47 @@ pub async fn run(config: Config) -> io::Result<()> {
 
     let (res, ..) = future::select_all(vfut).await;
     res
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet, PartialOrd, Ord)]
+pub struct AccessLabel {
+    pub client: String,
+    pub relay_over_tls: Option<bool>, // 只有bypass时，该字段才为Some
+    pub target: String,
+    pub username: String,
+}
+
+pub static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
+    let mut registry = Registry::default();
+    let proxy_traffic = Family::<LabelImpl<AccessLabel>, Counter>::default();
+    registry.register("proxy_traffic", "num proxy_traffic", proxy_traffic.clone());
+    register_metric_cleaner(proxy_traffic.clone(), "proxy_traffic".to_owned(), 2);
+
+    Metrics {
+        registry,
+        proxy_traffic,
+    }
+});
+
+pub struct Metrics {
+    pub registry: Registry,
+    pub(crate) proxy_traffic: Family<LabelImpl<AccessLabel>, Counter>,
+    // pub(crate) tunnel_bypass_setup_duration: Family<LabelImpl<TunnelHandshakeLabel>, Histogram>,
+}
+
+// 每两小时清空一次，否则一直累积，光是exporter的流量就很大，观察到每天需要3.7GB。不用担心rate函数不准，promql查询会自动处理reset（数据突降）的数据。
+// 不过，虽然能够处理reset，但increase会用最后一个出现的值-第一个出现的值。在我们清空的实现下，reset后第一个出现的值肯定不是0，所以increase的算出来的值会稍少（少第一次出现的值）
+// 因此对于准确性要求较高的http_req_counter，这里的清空间隔就放大一点
+fn register_metric_cleaner<T: Label + Send + Sync, M: 'static + Send + Sync>(
+    counter: Family<T, M>,
+    name: String,
+    interval_in_hour: u64,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(interval_in_hour * 60 * 60)).await;
+            info!("cleaning prometheus metric labels for {name}");
+            counter.clear();
+        }
+    });
 }
