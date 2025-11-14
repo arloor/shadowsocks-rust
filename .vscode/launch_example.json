@@ -7,7 +7,32 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug",
+            "name": "Debug origin sslocal",
+            "program": "${workspaceFolder}/target/debug/sslocal",
+            "args": [
+                "--local-addr",
+                "[::]:1080",
+                "-k",
+                "xxxxxxxxxxxxxxx", // ssservice genkey -m "2022-blake3-aes-256-gcm"
+                "-v",
+                "-m",
+                "2022-blake3-aes-256-gcm",
+                "-s",
+                "host:port",
+                "--log-config",
+                "log4rs.yml"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build origin sslocal",
+            "env": {
+                "HOSTNAME": "test",
+                // "RUST_LOG": "debug"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug https-tunnel sslocal",
             "program": "${workspaceFolder}/target/debug/sslocal",
             "args": [
                 "--log-config",
@@ -17,13 +42,11 @@
                 "-k",
                 "username:password",
                 "-v",
-                "-m",
-                "aes-256-gcm", // reversed for compatibility
                 "-s",
                 "host:port"
             ],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "cargo build https-tunnel",
+            "preLaunchTask": "cargo build https-tunnel sslocal",
             "env": {
                 "HOSTNAME": "test"
                 // "RUST_LOG": "debug"

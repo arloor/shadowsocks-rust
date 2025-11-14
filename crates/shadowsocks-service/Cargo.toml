@@ -80,6 +80,7 @@ https-tunnel = [
     "webpki-roots",
     "rustls-native-certs",
     "base64",
+    "shadowsocks/https-tunnel",
 ]
 # Enable REDIR protocol for sslocal
 # (transparent proxy)

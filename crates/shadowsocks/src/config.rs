@@ -499,6 +499,7 @@ where
     let password = password.into();
 
     match method {
+        #[cfg(not(feature = "https-tunnel"))]
         CipherKind::NONE => {
             // NONE method's key length is 0
             debug_assert_eq!(method.key_len(), 0);

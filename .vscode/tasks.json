@@ -18,7 +18,7 @@
 			"group": {
 				"kind": "build"
 			},
-			"label": "cargo build https-tunnel",
+			"label": "cargo build https-tunnel sslocal",
 			"presentation": {
 				"echo": true,
 				"reveal": "silent",
@@ -36,8 +36,6 @@
 				"${workspaceFolderBasename}",
 				"--bin",
 				"sslocal",
-				// "--features",
-				// "https-tunnel"
 			],
 			"problemMatcher": [
 				"$rustc"
@@ -45,7 +43,7 @@
 			"group": {
 				"kind": "build"
 			},
-			"label": "cargo build",
+			"label": "cargo build origin sslocal",
 			"presentation": {
 				"echo": true,
 				"reveal": "silent",

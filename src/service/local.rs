@@ -142,15 +142,6 @@ pub fn define_command_line_options(mut app: Command) -> Command {
         .help("UDP relay's externally visible address return in UDP Associate responses"),
     )
     .arg(
-        Arg::new("SERVER_ADDR")
-            .short('s')
-            .long("server-addr")
-            .num_args(1)
-            .action(ArgAction::Set)
-            .requires("ENCRYPT_METHOD")
-            .help("Server address"),
-    )
-    .arg(
         Arg::new("PASSWORD")
             .short('k')
             .long("password")
@@ -158,16 +149,6 @@ pub fn define_command_line_options(mut app: Command) -> Command {
             .action(ArgAction::Set)
             .requires("SERVER_ADDR")
             .help("Server's password"),
-    )
-    .arg(
-        Arg::new("ENCRYPT_METHOD")
-            .short('m')
-            .long("encrypt-method")
-            .num_args(1)
-            .action(ArgAction::Set)
-            .requires("SERVER_ADDR")
-            .value_parser(PossibleValuesParser::new(available_ciphers()))
-            .help("Server's encryption method"),
     )
     .arg(
         Arg::new("TIMEOUT")
@@ -269,6 +250,53 @@ pub fn define_command_line_options(mut app: Command) -> Command {
                     .value_hint(ValueHint::FilePath)
                     .help("log4rs configuration file"),
             );
+    }
+
+    #[cfg(not(feature = "https-tunnel"))]
+    {
+        app = app
+            .arg(
+                Arg::new("ENCRYPT_METHOD")
+                    .short('m')
+                    .long("encrypt-method")
+                    .num_args(1)
+                    .action(ArgAction::Set)
+                    .requires("SERVER_ADDR")
+                    .value_parser(PossibleValuesParser::new(available_ciphers()))
+                    .help("Server's encryption method"),
+            )
+            .arg(
+                Arg::new("SERVER_ADDR")
+                    .short('s')
+                    .long("server-addr")
+                    .num_args(1)
+                    .action(ArgAction::Set)
+                    .requires("ENCRYPT_METHOD")
+                    .help("Server address"),
+            )
+    }
+    #[cfg(feature = "https-tunnel")]
+    {
+        app = app
+            .arg(
+                Arg::new("ENCRYPT_METHOD")
+                    .short('m')
+                    .long("encrypt-method")
+                    .default_value("none")
+                    .num_args(1)
+                    .action(ArgAction::Set)
+                    .requires("SERVER_ADDR")
+                    .value_parser(PossibleValuesParser::new(available_ciphers()))
+                    .help("Server's encryption method"),
+            )
+            .arg(
+                Arg::new("SERVER_ADDR")
+                    .short('s')
+                    .long("server-addr")
+                    .num_args(1)
+                    .action(ArgAction::Set)
+                    .help("Server address"),
+            )
     }
 
     #[cfg(feature = "local-tunnel")]

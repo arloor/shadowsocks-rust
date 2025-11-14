@@ -47,6 +47,7 @@ aead-cipher-2022-extra = ["aead-cipher-2022", "shadowsocks-crypto/v2-extra"]
 
 # Enable detection against replay attack
 security-replay-attack-detect = ["bloomfilter"]
+https-tunnel = []
 
 [dependencies]
 log = "0.4"
