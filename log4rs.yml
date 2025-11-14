@@ -3,13 +3,13 @@ appenders:
   stdout:
     kind: console
     encoder:
-      pattern: "{d} {h({l}):<5} {M} {m}{n}"
+      pattern: "{d} {h({l}):<5} [{M}] {m}{n}"
   file:
     kind: rolling_file
     path: shadowsocks.log
     encoder:
       kind: pattern
-      pattern: "{d} {h({l}):<5} {m}{n}"
+      pattern: "{d} {h({l}):<5} [{M}] {m}{n}"
     policy:
       trigger:
         kind: size
