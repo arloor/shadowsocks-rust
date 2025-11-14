@@ -1,0 +1,58 @@
+name: Shadowsocks Build and Release
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+permissions:
+  contents: write
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      # 构建 sslocal
+      - name: Build sslocal
+        id: build-sslocal
+        uses: arloor/rust_musl_action@latest
+        with:
+          use_musl: false
+          args: -r --bin sslocal --features https-tunnel
+          apt_mirror: mirrors.mit.edu
+          debug: false
+
+      # 构建 ssserver
+      - name: Build ssserver
+        id: build-ssserver
+        uses: arloor/rust_musl_action@latest
+        with:
+          use_musl: false
+          args: -r --bin ssserver
+          apt_mirror: mirrors.mit.edu
+          debug: false
+
+      # 复制二进制文件
+      - name: Copy binaries
+        run: |
+          mkdir -p ${{ github.workspace }}/release_binaries
+          cp ${{ steps.build-sslocal.outputs.release_dir }}sslocal ${{ github.workspace }}/release_binaries/sslocal
+          cp ${{ steps.build-ssserver.outputs.release_dir }}ssserver ${{ github.workspace }}/release_binaries/ssserver
+          ls -lh ${{ github.workspace }}/release_binaries/
+
+      # 创建 GitHub Release
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=latest
+          if $(gh release delete ${version} -y --cleanup-tag);
+            then echo "delete old release";
+            else echo "no old release";
+          fi
+          git config --local user.email "admin@arloor.com"
+          git config --local user.name "arloor"
+          gh release create ${version} release_binaries/* -n "Shadowsocks 最新构建，包含 sslocal 和 ssserver" --latest -t "${version}"
