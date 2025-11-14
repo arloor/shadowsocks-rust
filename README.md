@@ -12,7 +12,7 @@ or
 
 ```bash
 cargo install --path . --bin sslocal --features https-tunnel
-cargo install --path . --bin ssserver
+cargo install --path . --bin ssserver #--prom-port 9500
 ```
 
 测试：

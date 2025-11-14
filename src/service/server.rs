@@ -21,13 +21,16 @@ use shadowsocks_service::{
     },
 };
 
+const PROMETHEUS_EXPORTER_DEFAULT_PORT: u16 = 9323;
+const PROMETHEUS_EXPORTER_DEFAULT_PORT_STR: &'static str = "9323";
+
 #[cfg(feature = "logging")]
 use crate::logging;
 use crate::{
     config::{Config as ServiceConfig, RuntimeMode},
     error::{ShadowsocksError, ShadowsocksResult},
     monitor,
-    service::prom_exporter::{self, prom_exporter},
+    service::prom_exporter::prom_exporter,
     vparser,
 };
 
@@ -160,6 +163,15 @@ pub fn define_command_line_options(mut app: Command) -> Command {
                 .short('6')
                 .action(ArgAction::SetTrue)
                 .help("Resolve hostname to IPv6 address first"),
+        )
+        .arg(
+            Arg::new("PROM_PORT")
+                .long("prom-port")
+                .num_args(1)
+                .action(ArgAction::Set)
+                .default_value(PROMETHEUS_EXPORTER_DEFAULT_PORT_STR)
+                .value_parser(clap::value_parser!(u16))
+                .help("Prometheus exporter listen port"),
         );
 
     #[cfg(feature = "logging")]
@@ -532,11 +544,14 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
 
         (config, runtime)
     };
+    let prom_port = *matches
+        .get_one::<u16>("PROM_PORT")
+        .unwrap_or(&PROMETHEUS_EXPORTER_DEFAULT_PORT);
 
     let main_fut = async move {
         let abort_signal = monitor::create_signal_monitor();
         let server = run_server(config);
-        let prom_exporter = prom_exporter(9323);
+        let prom_exporter = prom_exporter(prom_port);
 
         tokio::pin!(abort_signal);
         tokio::pin!(server);

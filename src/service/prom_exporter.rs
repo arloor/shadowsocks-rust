@@ -15,6 +15,7 @@ type DynError = Box<dyn Error + Send + Sync>; // wrapper for dyn Error
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(if !cfg!(debug_assertions) { 600 } else { 10 }); // 3 minutes
 
 pub(crate) async fn prom_exporter(port: u16) -> Result<(), DynError> {
+    log::info!("Starting Prometheus exporter on port {}", port);
     let router = build_router();
     axum_bootstrap::new_server(port, router)
         .with_timeout(IDLE_TIMEOUT)

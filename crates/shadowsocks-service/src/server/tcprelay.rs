@@ -11,7 +11,6 @@ use std::{
 use io_x::CounterIO;
 use log::{debug, error, info, trace, warn};
 use prom_label::LabelImpl;
-use prometheus_client::encoding::EncodeLabelSet;
 use shadowsocks::{
     ProxyListener, ServerConfig,
     crypto::CipherKind,
