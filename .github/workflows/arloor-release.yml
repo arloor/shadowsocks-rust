@@ -23,6 +23,7 @@ jobs:
           use_musl: false
           args: --bin sslocal --features https-tunnel
           apt_mirror: mirrors.mit.edu
+          extra_deps: gcc
           debug: false
 
       # 构建 ssserver
@@ -34,6 +35,7 @@ jobs:
           args: --bin ssserver
           apt_mirror: mirrors.mit.edu
           debug: false
+          extra_deps: gcc
 
       # 复制二进制文件
       - name: Copy binaries
