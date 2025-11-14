@@ -11,8 +11,8 @@ install /tmp/sslocal /usr/bin/sslocal
 or
 
 ```bash
-cargo install --path . --bin sslocal --features https-tunnel
-cargo install --path . --bin ssserver #--prom-port 9500
+cargo install --path . --bin sslocal --features https-tunnel # 开启 HTTPS 代理支持，同时会禁用ss的加密、UDP支持
+cargo install --path . --bin ssserver #--prom-port 9500 # 支持 Prometheus 监控
 ```
 
 测试：
