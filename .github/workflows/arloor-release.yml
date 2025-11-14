@@ -21,7 +21,7 @@ jobs:
         uses: arloor/rust_musl_action@latest
         with:
           use_musl: false
-          args: -r --bin sslocal --features https-tunnel
+          args: --bin sslocal --features https-tunnel
           apt_mirror: mirrors.mit.edu
           debug: false
 
@@ -31,7 +31,7 @@ jobs:
         uses: arloor/rust_musl_action@latest
         with:
           use_musl: false
-          args: -r --bin ssserver
+          args: --bin ssserver
           apt_mirror: mirrors.mit.edu
           debug: false
 
