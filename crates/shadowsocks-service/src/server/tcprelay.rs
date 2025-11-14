@@ -25,7 +25,7 @@ use tokio::{
 
 use crate::{
     net::{MonProxyStream, utils::ignore_until_end},
-    server::{AccessLabel, METRICS},
+    server::{AccessLabel, METRICS, TunnelHandshakeLabel},
 };
 
 use super::context::ServiceContext;
@@ -204,6 +204,7 @@ impl TcpServerClient {
             return Ok(());
         }
 
+        let start_time = std::time::Instant::now();
         let mut remote_stream = match timeout_fut(
             self.timeout,
             OutboundTcpStream::connect_remote_with_opts(
@@ -214,7 +215,16 @@ impl TcpServerClient {
         )
         .await
         {
-            Ok(s) => s,
+            Ok(s) => {
+                let duration = start_time.elapsed();
+                METRICS
+                    .tunnel_handshake_duration
+                    .get_or_create(&LabelImpl::new(TunnelHandshakeLabel {
+                        target: target_addr.to_string(),
+                    }))
+                    .observe(duration.as_millis() as f64);
+                s
+            }
             Err(err) => {
                 error!(
                     "tcp tunnel {} -> {} connect failed, error: {}",

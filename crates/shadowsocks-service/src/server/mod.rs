@@ -12,7 +12,7 @@ use log::{info, trace};
 use prom_label::{Label, LabelImpl};
 use prometheus_client::{
     encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family},
+    metrics::{counter::Counter, family::Family, histogram::Histogram},
     registry::Registry,
 };
 use shadowsocks::net::{AcceptOpts, ConnectOpts, UdpSocketOpts};
@@ -207,22 +207,44 @@ pub struct AccessLabel {
     pub username: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet, PartialOrd, Ord)]
+pub struct TunnelHandshakeLabel {
+    pub target: String,
+    // pub final_target: Option<String>, // 是否是通过bypass中继的
+}
+
 pub static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
     let mut registry = Registry::default();
     let proxy_traffic = Family::<LabelImpl<AccessLabel>, Counter>::default();
     registry.register("proxy_traffic", "num proxy_traffic", proxy_traffic.clone());
     register_metric_cleaner(proxy_traffic.clone(), "proxy_traffic".to_owned(), 2);
+    // Summary指标：统计tunnel_proxy_bypass从接收请求到完成bypass握手的耗时
+    let tunnel_handshake_duration = Family::<LabelImpl<TunnelHandshakeLabel>, Histogram>::new_with_constructor(|| {
+        // 使用细粒度的buckets来统计耗时分布，单位是ms
+        Histogram::new([1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0])
+    });
+    registry.register(
+        "tunnel_bypass_setup_duration",
+        "Duration in seconds from receiving request to completing server handshake",
+        tunnel_handshake_duration.clone(),
+    );
+    register_metric_cleaner(
+        tunnel_handshake_duration.clone(),
+        "tunnel_handshake_duration".to_owned(),
+        2,
+    );
 
     Metrics {
         registry,
         proxy_traffic,
+        tunnel_handshake_duration,
     }
 });
 
 pub struct Metrics {
     pub registry: Registry,
     pub(crate) proxy_traffic: Family<LabelImpl<AccessLabel>, Counter>,
-    // pub(crate) tunnel_bypass_setup_duration: Family<LabelImpl<TunnelHandshakeLabel>, Histogram>,
+    pub(crate) tunnel_handshake_duration: Family<LabelImpl<TunnelHandshakeLabel>, Histogram>,
 }
 
 // 每两小时清空一次，否则一直累积，光是exporter的流量就很大，观察到每天需要3.7GB。不用担心rate函数不准，promql查询会自动处理reset（数据突降）的数据。
