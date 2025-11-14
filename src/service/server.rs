@@ -3,7 +3,9 @@
 use std::{future::Future, net::IpAddr, path::PathBuf, process::ExitCode, time::Duration};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command, ValueHint, builder::PossibleValuesParser};
-use futures::future::{self, Either};
+use futures::
+    FutureExt
+;
 use log::{info, trace};
 use tokio::{
     self,
@@ -549,39 +551,39 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         .unwrap_or(&PROMETHEUS_EXPORTER_DEFAULT_PORT);
 
     let main_fut = async move {
-        let abort_signal = monitor::create_signal_monitor();
-        let server = run_server(config);
-        let prom_exporter = prom_exporter(prom_port);
+        let abort_signal = monitor::create_signal_monitor().fuse();
+        let server = run_server(config).fuse();
+        let prom_exporter = prom_exporter(prom_port).fuse();
 
         tokio::pin!(abort_signal);
         tokio::pin!(server);
         tokio::pin!(prom_exporter);
-        let join = async {
-            match future::select(server, abort_signal).await {
-                // Server future resolved without an error. This should never happen.
-                Either::Left((Ok(..), ..)) => Err(ShadowsocksError::ServerExitUnexpectedly(
-                    "server exited unexpectedly".to_owned(),
-                )),
-                // Server future resolved with error, which are listener errors in most cases
-                Either::Left((Err(err), ..)) => {
-                    Err(ShadowsocksError::ServerAborted(format!("server aborted with {err}")))
-                }
-                // The abort signal future resolved. Means we should just exit.
-                Either::Right(_) => Ok(()),
-            }
-        };
-        tokio::pin!(join);
 
-        match future::select(join, prom_exporter).await {
-            // Server future resolved without an error. This should never happen.
-            Either::Left((Ok(..), ..)) => Err(ShadowsocksError::ServerExitUnexpectedly(
-                "server exited unexpectedly".to_owned(),
-            )),
-            // Server future resolved with error, which are listener errors in most cases
-            Either::Left((Err(err), ..)) => Err(ShadowsocksError::ServerAborted(format!("server aborted with {err}"))),
+        // loop {
+        futures::select! {
+            // Server future resolved
+            result = server => {
+                return match result {
+                    // Server future resolved without an error. This should never happen.
+                    Ok(..) => Err(ShadowsocksError::ServerExitUnexpectedly(
+                        "server exited unexpectedly".to_owned(),
+                    )),
+                    // Server future resolved with error, which are listener errors in most cases
+                    Err(err) => Err(ShadowsocksError::ServerAborted(format!("server aborted with {err}"))),
+                };
+            }
             // The abort signal future resolved. Means we should just exit.
-            Either::Right(_) => Ok(()),
+            _ = abort_signal => {
+                return Ok(());
+            }
+            // Prometheus exporter future resolved. This should never happen.
+            _ = prom_exporter => {
+                return Err(ShadowsocksError::ServerExitUnexpectedly(
+                    "prometheus exporter exited unexpectedly".to_owned(),
+                ));
+            }
         }
+        // }
     };
 
     Ok((runtime, main_fut))
