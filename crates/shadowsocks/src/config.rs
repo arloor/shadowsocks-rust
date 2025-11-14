@@ -15,7 +15,9 @@ use base64::Engine as _;
 use byte_string::ByteStr;
 use bytes::Bytes;
 use cfg_if::cfg_if;
-use log::{error, warn};
+use log::error;
+#[cfg(not(feature = "https-tunnel"))]
+use log::warn;
 use thiserror::Error;
 use url::{self, Url};
 

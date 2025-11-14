@@ -3,14 +3,8 @@
 use std::{io, net::SocketAddr};
 
 use log::{debug, trace};
-use shadowsocks::{
-    config::ServerConfig,
-    relay::{socks5::Address, tcprelay::utils::copy_encrypted_bidirectional},
-};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, copy_bidirectional},
-    time,
-};
+use shadowsocks::{config::ServerConfig, relay::socks5::Address};
+use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
 
 use crate::local::net::AutoProxyIo;
 
@@ -73,8 +67,9 @@ where
     #[cfg(feature = "https-tunnel")]
     let result = copy_bidirectional(shadow, plain).await;
     #[cfg(not(feature = "https-tunnel"))]
-    let result =
-        shadowsocks::relay::tcprelay::utils::copy_encrypted_bidirectional(svr_cfg.method(), shadow, plain).await;
+    use shadowsocks::relay::tcprelay::utils::copy_encrypted_bidirectional;
+    #[cfg(not(feature = "https-tunnel"))]
+    let result = copy_encrypted_bidirectional(svr_cfg.method(), shadow, plain).await;
     match result {
         Ok((wn, rn)) => {
             trace!(

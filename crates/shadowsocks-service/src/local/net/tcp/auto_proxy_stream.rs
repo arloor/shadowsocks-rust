@@ -36,12 +36,11 @@ pub enum AutoProxyClientStream {
 #[cfg(feature = "https-tunnel")]
 use {
     bytes::{BufMut, BytesMut},
-    httparse::{Response, Status},
     log::warn,
     rustls_native_certs::CertificateResult,
     std::io::ErrorKind,
     std::sync::LazyLock,
-    tokio::io::{AsyncReadExt, AsyncWriteExt},
+    tokio::io::AsyncWriteExt,
     tokio_rustls::{
         TlsConnector,
         rustls::{ClientConfig, RootCertStore, pki_types::ServerName},

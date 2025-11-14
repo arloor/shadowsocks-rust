@@ -1,5 +1,7 @@
 //! HTTP Client
 
+#[cfg(not(feature = "https-tunnel"))]
+use http::{Method as HttpMethod, Uri, Version as HttpVersion};
 use std::{
     borrow::Cow,
     collections::VecDeque,
@@ -12,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use http::{HeaderValue, Method as HttpMethod, Uri, Version as HttpVersion, header::InvalidHeaderValue};
+use http::{HeaderValue, header::InvalidHeaderValue};
 use hyper::{
     Request, Response,
     body::{self, Body},
