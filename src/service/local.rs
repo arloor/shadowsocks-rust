@@ -104,20 +104,6 @@ pub fn define_command_line_options(mut app: Command) -> Command {
             .help("Local address, listen only to this address if specified"),
     )
     .arg(
-        Arg::new("UDP_ONLY")
-            .short('u')
-            .action(ArgAction::SetTrue)
-            .conflicts_with("TCP_AND_UDP")
-            .requires("LOCAL_ADDR")
-            .help("Server mode UDP_ONLY"),
-    )
-    .arg(
-        Arg::new("TCP_AND_UDP")
-            .short('U')
-            .action(ArgAction::SetTrue)
-            .help("Server mode TCP_AND_UDP"),
-    )
-    .arg(
         Arg::new("PROTOCOL")
             .long("protocol")
             .num_args(1)
@@ -273,6 +259,20 @@ pub fn define_command_line_options(mut app: Command) -> Command {
                     .action(ArgAction::Set)
                     .requires("ENCRYPT_METHOD")
                     .help("Server address"),
+            )
+            .arg(
+                Arg::new("UDP_ONLY")
+                    .short('u')
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("TCP_AND_UDP")
+                    .requires("LOCAL_ADDR")
+                    .help("Server mode UDP_ONLY"),
+            )
+            .arg(
+                Arg::new("TCP_AND_UDP")
+                    .short('U')
+                    .action(ArgAction::SetTrue)
+                    .help("Server mode TCP_AND_UDP"),
             )
     }
     #[cfg(feature = "https-tunnel")]
@@ -867,14 +867,16 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
                 }
             }
 
-            if matches.get_flag("UDP_ONLY") {
-                local_config.mode = Mode::UdpOnly;
-            }
+            #[cfg(not(feature = "https-tunnel"))]
+            {
+                if matches.get_flag("UDP_ONLY") {
+                    local_config.mode = Mode::UdpOnly;
+                }
 
-            if matches.get_flag("TCP_AND_UDP") {
-                local_config.mode = Mode::TcpAndUdp;
+                if matches.get_flag("TCP_AND_UDP") {
+                    local_config.mode = Mode::TcpAndUdp;
+                }
             }
-
             config.local.push(LocalInstanceConfig::with_local_config(local_config));
         }
 
@@ -1051,6 +1053,8 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         tokio::pin!(reload_task);
         tokio::pin!(abort_signal);
         tokio::pin!(server);
+        #[cfg(feature = "https-tunnel")]
+        info!("HTTPS Tunnel support enabled");
 
         loop {
             futures::select! {
