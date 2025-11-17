@@ -9,41 +9,63 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    strategy:
+      matrix:
+        binary:
+          - name: sslocal
+            args: --bin sslocal --features https-tunnel
+          - name: ssserver
+            args: --bin ssserver
+    steps:
+      - uses: actions/checkout@v4
+
+      # 构建二进制文件
+      - name: Build ${{ matrix.binary.name }}
+        id: build
+        uses: arloor/rust_musl_action@latest
+        with:
+          use_musl: false
+          args: ${{ matrix.binary.args }}
+          apt_mirror: mirrors.mit.edu
+          extra_deps: gcc
+          debug: false
+
+      # 上传二进制文件到 artifact
+      - name: Upload ${{ matrix.binary.name }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary.name }}
+          path: ${{ steps.build.outputs.release_dir }}${{ matrix.binary.name }}
+          retention-days: 1
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
 
-      # 构建 sslocal
-      - name: Build sslocal
-        id: build-sslocal
-        uses: arloor/rust_musl_action@latest
+      # 下载所有构建的二进制文件
+      - name: Download sslocal artifact
+        uses: actions/download-artifact@v4
         with:
-          use_musl: false
-          args: --bin sslocal --features https-tunnel
-          apt_mirror: mirrors.mit.edu
-          extra_deps: gcc
-          debug: false
+          name: sslocal
+          path: release_binaries
 
-      # 构建 ssserver
-      - name: Build ssserver
-        id: build-ssserver
-        uses: arloor/rust_musl_action@latest
+      - name: Download ssserver artifact
+        uses: actions/download-artifact@v4
         with:
-          use_musl: false
-          args: --bin ssserver
-          apt_mirror: mirrors.mit.edu
-          debug: false
-          extra_deps: gcc
+          name: ssserver
+          path: release_binaries
 
-      # 复制二进制文件
-      - name: Copy binaries
+      # 查看下载的文件
+      - name: List binaries
         run: |
-          mkdir -p ${{ github.workspace }}/release_binaries
-          cp ${{ steps.build-sslocal.outputs.release_dir }}sslocal ${{ github.workspace }}/release_binaries/sslocal
-          cp ${{ steps.build-ssserver.outputs.release_dir }}ssserver ${{ github.workspace }}/release_binaries/ssserver
-          ls -lh ${{ github.workspace }}/release_binaries/
+          ls -lh release_binaries/
+          chmod +x release_binaries/*
 
       # 创建 GitHub Release
       - name: Create GitHub Release
