@@ -783,16 +783,16 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
 
             #[cfg(feature = "local-redir")]
             {
-                if RedirType::tcp_default() != RedirType::NotSupported {
-                    if let Some(tcp_redir) = matches.get_one::<String>("TCP_REDIR") {
-                        local_config.tcp_redir = tcp_redir.parse::<RedirType>().expect("tcp-redir");
-                    }
+                if RedirType::tcp_default() != RedirType::NotSupported
+                    && let Some(tcp_redir) = matches.get_one::<String>("TCP_REDIR")
+                {
+                    local_config.tcp_redir = tcp_redir.parse::<RedirType>().expect("tcp-redir");
                 }
 
-                if RedirType::udp_default() != RedirType::NotSupported {
-                    if let Some(udp_redir) = matches.get_one::<String>("UDP_REDIR") {
-                        local_config.udp_redir = udp_redir.parse::<RedirType>().expect("udp-redir");
-                    }
+                if RedirType::udp_default() != RedirType::NotSupported
+                    && let Some(udp_redir) = matches.get_one::<String>("UDP_REDIR")
+                {
+                    local_config.udp_redir = udp_redir.parse::<RedirType>().expect("udp-redir");
                 }
             }
 

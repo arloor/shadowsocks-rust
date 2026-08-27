@@ -59,14 +59,13 @@ use std::{
 
 use cfg_if::cfg_if;
 #[cfg(feature = "hickory-dns")]
-use hickory_resolver::config::{NameServerConfig, ResolverConfig};
+use hickory_resolver::config::{ConnectionConfig, NameServerConfig, ResolverConfig};
 #[cfg(feature = "local-tun")]
 use ipnet::IpNet;
 #[cfg(feature = "local-fake-dns")]
 use ipnet::{Ipv4Net, Ipv6Net};
 use log::warn;
 use serde::{Deserialize, Serialize};
-#[cfg(any(feature = "local-tunnel", feature = "local-dns"))]
 use shadowsocks::relay::socks5::Address;
 use shadowsocks::{
     config::{
@@ -76,10 +75,184 @@ use shadowsocks::{
     crypto::CipherKind,
     plugin::PluginConfig,
 };
+use url::Url;
 
 use crate::acl::AccessControl;
 #[cfg(feature = "local-dns")]
 use crate::local::dns::NameServerAddr;
+
+/// Configuration for outbound SOCKS5 username/password authentication
+#[derive(Clone, Eq, PartialEq)]
+pub struct OutboundProxyAuth {
+    pub username: String,
+    pub password: String,
+}
+
+impl Debug for OutboundProxyAuth {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OutboundProxyAuth")
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutboundProxyProtocol {
+    Socks5,
+    Http,
+    Https,
+}
+
+impl OutboundProxyProtocol {
+    fn from_scheme(scheme: &str) -> Result<Self, String> {
+        match scheme {
+            "socks5" => Ok(Self::Socks5),
+            "http" => Ok(Self::Http),
+            "https" => Ok(Self::Https),
+            _ => Err(format!(
+                "unsupported proxy scheme, only socks5://, http:// and https:// are supported: {scheme}://"
+            )),
+        }
+    }
+
+    fn as_scheme(self) -> &'static str {
+        match self {
+            Self::Socks5 => "socks5",
+            Self::Http => "http",
+            Self::Https => "https",
+        }
+    }
+}
+
+/// Configuration for an outbound proxy hop
+///
+/// `ssserver` will route its outbound TCP connections through this proxy.
+/// Config file format accepts either a single string like `"socks5://host:port"`
+/// or a chain like `["socks5://host:port", "http://host:port", "https://host:port"]`.
+#[derive(Clone, Eq, PartialEq)]
+pub struct OutboundProxy {
+    pub protocol: OutboundProxyProtocol,
+    pub host: String,
+    pub port: u16,
+    pub auth: Option<OutboundProxyAuth>,
+}
+
+impl Debug for OutboundProxy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OutboundProxy")
+            .field("protocol", &self.protocol)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("auth", &self.auth)
+            .finish()
+    }
+}
+
+impl OutboundProxy {
+    /// Parse from a URL string like `socks5://127.0.0.1:1080`,
+    /// `http://user:pass@127.0.0.1:3128` or `https://[::1]:443`
+    pub fn from_url(url: &str) -> Result<Self, String> {
+        let parsed = Url::parse(url).map_err(|e| format!("invalid proxy url {url}: {e}"))?;
+        let protocol = OutboundProxyProtocol::from_scheme(parsed.scheme())?;
+
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| format!("missing proxy host in {url}"))?
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_owned();
+        let port = parsed.port().ok_or_else(|| format!("missing proxy port in {url}"))?;
+
+        let auth = if parsed.username().is_empty() && parsed.password().is_none() {
+            None
+        } else {
+            let username = parsed.username().to_owned();
+            let password = parsed
+                .password()
+                .ok_or_else(|| format!("missing proxy password in {url}"))?
+                .to_owned();
+
+            if username.is_empty() {
+                return Err(format!("missing proxy username in {url}"));
+            }
+            if username.len() > u8::MAX as usize {
+                return Err(format!("proxy username is too long in {url}"));
+            }
+            if password.is_empty() {
+                return Err(format!("missing proxy password in {url}"));
+            }
+            if password.len() > u8::MAX as usize {
+                return Err(format!("proxy password is too long in {url}"));
+            }
+
+            Some(OutboundProxyAuth { username, password })
+        };
+
+        Ok(OutboundProxy {
+            protocol,
+            host,
+            port,
+            auth,
+        })
+    }
+
+    pub fn address(&self) -> Address {
+        match self.host.parse::<IpAddr>() {
+            Ok(ip) => Address::SocketAddress(SocketAddr::new(ip, self.port)),
+            Err(..) => Address::DomainNameAddress(self.host.clone(), self.port),
+        }
+    }
+
+    /// Serialize back to URL form, with brackets for IPv6 hosts
+    pub fn to_url(&self) -> String {
+        let host = if self.host.contains(':') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+
+        match self.auth {
+            Some(ref auth) => format!(
+                "{}://{}:{}@{}:{}",
+                self.protocol.as_scheme(),
+                auth.username,
+                auth.password,
+                host,
+                self.port
+            ),
+            None => format!("{}://{}:{}", self.protocol.as_scheme(), host, self.port),
+        }
+    }
+}
+
+/// Serde helper for single-hop and multi-hop outbound proxy configuration
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum SSOutboundProxyConfig {
+    Single(String),
+    Chain(Vec<String>),
+}
+
+impl SSOutboundProxyConfig {
+    fn into_proxies(self) -> Result<Vec<OutboundProxy>, String> {
+        match self {
+            Self::Single(s) => Ok(vec![OutboundProxy::from_url(&s)?]),
+            Self::Chain(v) => v.iter().map(|s| OutboundProxy::from_url(s)).collect(),
+        }
+    }
+
+    fn from_proxies(proxies: &[OutboundProxy]) -> Option<Self> {
+        match proxies.len() {
+            0 => None,
+            1 => Some(Self::Single(proxies[0].to_url())),
+            _ => Some(Self::Chain(proxies.iter().map(|p| p.to_url()).collect())),
+        }
+    }
+}
+
+#[cfg(feature = "local-http")]
+use crate::local::http::config::HttpAuthConfig;
 #[cfg(feature = "local")]
 use crate::local::socks::config::Socks5AuthConfig;
 
@@ -219,6 +392,12 @@ struct SSConfig {
     outbound_udp_allow_fragmentation: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    inbound_udp_allow_fragmentation: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outbound_proxy: Option<SSOutboundProxyConfig>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     security: Option<SSSecurityConfig>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -323,6 +502,11 @@ struct SSLocalExtConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     socks5_auth_config_path: Option<String>,
 
+    /// HTTP
+    #[cfg(feature = "local-http")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    http_auth_config_path: Option<String>,
+
     /// Fake DNS
     #[cfg(feature = "local-fake-dns")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -411,6 +595,12 @@ struct SSServerExtConfig {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     outbound_udp_allow_fragmentation: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inbound_udp_allow_fragmentation: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outbound_proxy: Option<SSOutboundProxyConfig>,
 }
 
 #[cfg(feature = "local-online-config")]
@@ -1038,6 +1228,10 @@ pub struct LocalConfig {
     #[cfg(feature = "local")]
     pub socks5_auth: Socks5AuthConfig,
 
+    /// HTTP Authentication configuration
+    #[cfg(feature = "local-http")]
+    pub http_auth: HttpAuthConfig,
+
     /// Fake DNS record expire seconds
     #[cfg(feature = "local-fake-dns")]
     pub fake_dns_record_expire_duration: Option<Duration>,
@@ -1107,6 +1301,9 @@ impl LocalConfig {
 
             #[cfg(feature = "local")]
             socks5_auth: Socks5AuthConfig::default(),
+
+            #[cfg(feature = "local-http")]
+            http_auth: HttpAuthConfig::default(),
 
             #[cfg(feature = "local-fake-dns")]
             fake_dns_record_expire_duration: None,
@@ -1256,6 +1453,9 @@ pub struct ServerInstanceConfig {
     pub outbound_bind_addr: Option<IpAddr>,
     pub outbound_bind_interface: Option<String>,
     pub outbound_udp_allow_fragmentation: Option<bool>,
+    pub inbound_udp_allow_fragmentation: Option<bool>,
+    /// Outbound SOCKS5 proxy chain for this server instance (empty = no proxy)
+    pub outbound_proxy: Vec<OutboundProxy>,
 }
 
 impl ServerInstanceConfig {
@@ -1271,6 +1471,8 @@ impl ServerInstanceConfig {
             outbound_bind_addr: None,
             outbound_bind_interface: None,
             outbound_udp_allow_fragmentation: None,
+            inbound_udp_allow_fragmentation: None,
+            outbound_proxy: Vec::new(),
         }
     }
 }
@@ -1359,9 +1561,13 @@ pub struct Config {
     pub outbound_bind_addr: Option<IpAddr>,
     /// Outbound UDP sockets allow IP fragmentation
     pub outbound_udp_allow_fragmentation: bool,
+    /// Inbound UDP sockets allow IP fragmentation
+    pub inbound_udp_allow_fragmentation: bool,
     /// Path to protect callback unix address, only for Android
     #[cfg(target_os = "android")]
     pub outbound_vpn_protect_path: Option<PathBuf>,
+    /// Outbound SOCKS5 proxy chain for ssserver (global, can be overridden per server; empty = no proxy)
+    pub outbound_proxy: Vec<OutboundProxy>,
 
     /// Set `SO_SNDBUF` for inbound sockets
     pub inbound_send_buffer_size: Option<u32>,
@@ -1458,6 +1664,7 @@ macro_rules! impl_from {
 
 impl_from!(::std::io::Error, ErrorKind::IoError, "error while reading file");
 impl_from!(json5::Error, ErrorKind::JsonParsingError, "json parse error");
+impl_from!(serde_json::Error, ErrorKind::JsonParsingError, "json parse error");
 
 impl Debug for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -1504,8 +1711,10 @@ impl Config {
             outbound_bind_interface: None,
             outbound_bind_addr: None,
             outbound_udp_allow_fragmentation: false,
+            inbound_udp_allow_fragmentation: false,
             #[cfg(target_os = "android")]
             outbound_vpn_protect_path: None,
+            outbound_proxy: Vec::new(),
 
             inbound_send_buffer_size: None,
             inbound_recv_buffer_size: None,
@@ -1829,6 +2038,11 @@ impl Config {
                         #[cfg(feature = "local")]
                         if let Some(socks5_auth_config_path) = local.socks5_auth_config_path {
                             local_config.socks5_auth = Socks5AuthConfig::load_from_file(&socks5_auth_config_path)?;
+                        }
+
+                        #[cfg(feature = "local-http")]
+                        if let Some(http_auth_config_path) = local.http_auth_config_path {
+                            local_config.http_auth = HttpAuthConfig::load_from_file(&http_auth_config_path)?;
                         }
 
                         #[cfg(feature = "local-fake-dns")]
@@ -2217,6 +2431,16 @@ impl Config {
                     server_instance.outbound_udp_allow_fragmentation = Some(outbound_udp_allow_fragmentation);
                 }
 
+                if let Some(inbound_udp_allow_fragmentation) = svr.inbound_udp_allow_fragmentation {
+                    server_instance.inbound_udp_allow_fragmentation = Some(inbound_udp_allow_fragmentation);
+                }
+
+                if let Some(proxy_config) = svr.outbound_proxy {
+                    server_instance.outbound_proxy = proxy_config
+                        .into_proxies()
+                        .map_err(|e| Error::new(ErrorKind::Invalid, "invalid outbound_proxy", Some(e)))?;
+                }
+
                 nconfig.server.push(server_instance);
             }
         }
@@ -2386,17 +2610,26 @@ impl Config {
             nconfig.outbound_udp_allow_fragmentation = b;
         }
 
+        if let Some(b) = config.inbound_udp_allow_fragmentation {
+            nconfig.inbound_udp_allow_fragmentation = b;
+        }
+
+        if let Some(proxy_config) = config.outbound_proxy {
+            nconfig.outbound_proxy = proxy_config
+                .into_proxies()
+                .map_err(|e| Error::new(ErrorKind::Invalid, "invalid outbound_proxy", Some(e)))?;
+        }
+
         // Security
-        if let Some(sec) = config.security {
-            if let Some(replay_attack) = sec.replay_attack {
-                if let Some(policy) = replay_attack.policy {
-                    match policy.parse::<ReplayAttackPolicy>() {
-                        Ok(p) => nconfig.security.replay_attack.policy = p,
-                        Err(..) => {
-                            let err = Error::new(ErrorKind::Invalid, "invalid replay attack policy", None);
-                            return Err(err);
-                        }
-                    }
+        if let Some(sec) = config.security
+            && let Some(replay_attack) = sec.replay_attack
+            && let Some(policy) = replay_attack.policy
+        {
+            match policy.parse::<ReplayAttackPolicy>() {
+                Ok(p) => nconfig.security.replay_attack.policy = p,
+                Err(..) => {
+                    let err = Error::new(ErrorKind::Invalid, "invalid replay attack policy", None);
+                    return Err(err);
                 }
             }
         }
@@ -2441,31 +2674,34 @@ impl Config {
     /// 1. `[(unix|tcp|udp)://]host[:port][,host[:port]]...`
     /// 2. Pre-defined. Like `google`, `cloudflare`
     pub fn set_dns_formatted(&mut self, dns: &str) -> Result<(), Error> {
+        #[cfg(feature = "hickory-dns")]
+        use hickory_resolver::config::{CLOUDFLARE, GOOGLE, QUAD9};
+
         self.dns = match dns {
             "system" => DnsConfig::System,
 
             #[cfg(feature = "hickory-dns")]
-            "google" => DnsConfig::HickoryDns(ResolverConfig::google()),
+            "google" => DnsConfig::HickoryDns(ResolverConfig::udp_and_tcp(&GOOGLE)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-tls"))]
-            "google_tls" => DnsConfig::HickoryDns(ResolverConfig::google_tls()),
+            "google_tls" => DnsConfig::HickoryDns(ResolverConfig::tls(&GOOGLE)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-https"))]
-            "google_https" => DnsConfig::HickoryDns(ResolverConfig::google_https()),
+            "google_https" => DnsConfig::HickoryDns(ResolverConfig::https(&GOOGLE)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-h3"))]
-            "google_h3" => DnsConfig::HickoryDns(ResolverConfig::google_h3()),
+            "google_h3" => DnsConfig::HickoryDns(ResolverConfig::h3(&GOOGLE)),
 
             #[cfg(feature = "hickory-dns")]
-            "cloudflare" => DnsConfig::HickoryDns(ResolverConfig::cloudflare()),
+            "cloudflare" => DnsConfig::HickoryDns(ResolverConfig::udp_and_tcp(&CLOUDFLARE)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-tls"))]
-            "cloudflare_tls" => DnsConfig::HickoryDns(ResolverConfig::cloudflare_tls()),
+            "cloudflare_tls" => DnsConfig::HickoryDns(ResolverConfig::tls(&CLOUDFLARE)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-https"))]
-            "cloudflare_https" => DnsConfig::HickoryDns(ResolverConfig::cloudflare_https()),
+            "cloudflare_https" => DnsConfig::HickoryDns(ResolverConfig::https(&CLOUDFLARE)),
 
             #[cfg(feature = "hickory-dns")]
-            "quad9" => DnsConfig::HickoryDns(ResolverConfig::quad9()),
+            "quad9" => DnsConfig::HickoryDns(ResolverConfig::udp_and_tcp(&QUAD9)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-tls"))]
-            "quad9_tls" => DnsConfig::HickoryDns(ResolverConfig::quad9_tls()),
+            "quad9_tls" => DnsConfig::HickoryDns(ResolverConfig::tls(&QUAD9)),
             #[cfg(all(feature = "hickory-dns", feature = "dns-over-https"))]
-            "quad9_https" => DnsConfig::HickoryDns(ResolverConfig::quad9_https()),
+            "quad9_https" => DnsConfig::HickoryDns(ResolverConfig::https(&QUAD9)),
 
             nameservers => self.parse_dns_nameservers(nameservers)?,
         };
@@ -2475,8 +2711,6 @@ impl Config {
 
     #[cfg(any(feature = "hickory-dns", feature = "local-dns"))]
     fn parse_dns_nameservers(&mut self, nameservers: &str) -> Result<DnsConfig, Error> {
-        use hickory_resolver::proto::xfer::Protocol;
-
         #[cfg(all(unix, feature = "local-dns"))]
         if let Some(nameservers) = nameservers.strip_prefix("unix://") {
             // A special DNS server only for shadowsocks-android
@@ -2525,7 +2759,7 @@ impl Config {
         //
         // For example:
         //     `192.168.1.100,192.168.1.101,3.4.5.6`
-        let mut c = ResolverConfig::new();
+        let mut nameservers_config = Vec::new();
         for part in nameservers.split(',') {
             let socket_addr = if let Ok(socket_addr) = part.parse::<SocketAddr>() {
                 socket_addr
@@ -2540,20 +2774,30 @@ impl Config {
                 return Err(e);
             };
 
-            if protocol.enable_udp() {
-                let ns_config = NameServerConfig::new(socket_addr, Protocol::Udp);
-                c.add_name_server(ns_config);
-            }
-            if protocol.enable_tcp() {
-                let ns_config = NameServerConfig::new(socket_addr, Protocol::Tcp);
-                c.add_name_server(ns_config);
+            if protocol.enable_tcp() && protocol.enable_udp() {
+                let mut tcp_config = ConnectionConfig::tcp();
+                tcp_config.port = socket_addr.port();
+                let mut udp_config = ConnectionConfig::udp();
+                udp_config.port = socket_addr.port();
+                let ns_config = NameServerConfig::new(socket_addr.ip(), true, vec![tcp_config, udp_config]);
+                nameservers_config.push(ns_config);
+            } else if protocol.enable_udp() {
+                let mut udp_config = ConnectionConfig::udp();
+                udp_config.port = socket_addr.port();
+                let ns_config = NameServerConfig::new(socket_addr.ip(), true, vec![udp_config]);
+                nameservers_config.push(ns_config);
+            } else if protocol.enable_tcp() {
+                let mut tcp_config = ConnectionConfig::tcp();
+                tcp_config.port = socket_addr.port();
+                let ns_config = NameServerConfig::new(socket_addr.ip(), true, vec![tcp_config]);
+                nameservers_config.push(ns_config);
             }
         }
 
-        Ok(if c.name_servers().is_empty() {
+        Ok(if nameservers_config.is_empty() {
             DnsConfig::System
         } else {
-            DnsConfig::HickoryDns(c)
+            DnsConfig::HickoryDns(ResolverConfig::from_parts(None, vec![], nameservers_config))
         })
     }
 
@@ -2565,6 +2809,12 @@ impl Config {
     /// Load Config from a `str`
     pub fn load_from_str(s: &str, config_type: ConfigType) -> Result<Self, Error> {
         let c = json5::from_str::<SSConfig>(s)?;
+        Self::load_from_ssconfig(c, config_type)
+    }
+
+    /// Load Config from a JSON `str`
+    pub fn load_from_json_str(s: &str, config_type: ConfigType) -> Result<Self, Error> {
+        let c = serde_json::from_str::<SSConfig>(s)?;
         Self::load_from_ssconfig(c, config_type)
     }
 
@@ -2613,18 +2863,18 @@ impl Config {
             }
 
             // Balancer related checks
-            if let Some(rtt) = self.balancer.max_server_rtt {
-                if rtt.as_secs() == 0 {
-                    let err = Error::new(ErrorKind::Invalid, "balancer.max_server_rtt must be > 0", None);
-                    return Err(err);
-                }
+            if let Some(rtt) = self.balancer.max_server_rtt
+                && rtt.as_secs() == 0
+            {
+                let err = Error::new(ErrorKind::Invalid, "balancer.max_server_rtt must be > 0", None);
+                return Err(err);
             }
 
-            if let Some(intv) = self.balancer.check_interval {
-                if intv.as_secs() == 0 {
-                    let err = Error::new(ErrorKind::Invalid, "balancer.check_interval must be > 0", None);
-                    return Err(err);
-                }
+            if let Some(intv) = self.balancer.check_interval
+                && intv.as_secs() == 0
+            {
+                let err = Error::new(ErrorKind::Invalid, "balancer.check_interval must be > 0", None);
+                return Err(err);
             }
         }
 
@@ -2660,11 +2910,11 @@ impl Config {
             let server = &inst.config;
 
             // Plugin shouldn't be an empty string
-            if let Some(plugin) = server.plugin() {
-                if plugin.plugin.trim().is_empty() {
-                    let err = Error::new(ErrorKind::Malformed, "`plugin` shouldn't be an empty string", None);
-                    return Err(err);
-                }
+            if let Some(plugin) = server.plugin()
+                && plugin.plugin.trim().is_empty()
+            {
+                let err = Error::new(ErrorKind::Malformed, "`plugin` shouldn't be an empty string", None);
+                return Err(err);
             }
 
             // Server's domain name shouldn't be an empty string
@@ -2897,6 +3147,9 @@ impl fmt::Display for Config {
                         #[cfg(feature = "local")]
                         socks5_auth_config_path: None,
 
+                        #[cfg(feature = "local-http")]
+                        http_auth_config_path: None,
+
                         #[cfg(feature = "local-fake-dns")]
                         fake_dns_record_expire_duration: local.fake_dns_record_expire_duration.map(|d| d.as_secs()),
                         #[cfg(feature = "local-fake-dns")]
@@ -2940,7 +3193,7 @@ impl fmt::Display for Config {
                 jconf.password = if svr.method().is_none() {
                     None
                 } else {
-                    Some(svr.password().to_string())
+                    Some(svr.export_password())
                 };
                 jconf.plugin = svr.plugin().map(|p| p.plugin.to_string());
                 jconf.plugin_opts = svr.plugin().and_then(|p| p.plugin_opts.clone());
@@ -2960,6 +3213,8 @@ impl fmt::Display for Config {
                 };
                 jconf.timeout = svr.timeout().map(|t| t.as_secs());
                 jconf.mode = Some(svr.mode().to_string());
+
+                jconf.outbound_proxy = SSOutboundProxyConfig::from_proxies(&inst.outbound_proxy);
 
                 if let Some(ref acl) = inst.acl {
                     jconf.acl = Some(acl.file_path().to_str().unwrap().to_owned());
@@ -2984,7 +3239,7 @@ impl fmt::Display for Config {
                         password: if svr.method().is_none() {
                             None
                         } else {
-                            Some(svr.password().to_string())
+                            Some(svr.export_password())
                         },
                         method: svr.method().to_string(),
                         users: svr.user_manager().map(|m| {
@@ -3039,6 +3294,8 @@ impl fmt::Display for Config {
                         outbound_bind_addr: inst.outbound_bind_addr,
                         outbound_bind_interface: inst.outbound_bind_interface.clone(),
                         outbound_udp_allow_fragmentation: inst.outbound_udp_allow_fragmentation,
+                        inbound_udp_allow_fragmentation: inst.inbound_udp_allow_fragmentation,
+                        outbound_proxy: SSOutboundProxyConfig::from_proxies(&inst.outbound_proxy),
                     });
                 }
 
@@ -3065,21 +3322,21 @@ impl fmt::Display for Config {
                 jconf.mode = Some(m.mode.to_string());
             }
 
-            if jconf.method.is_none() {
-                if let Some(ref m) = m.method {
-                    jconf.method = Some(m.to_string());
-                }
+            if jconf.method.is_none()
+                && let Some(ref m) = m.method
+            {
+                jconf.method = Some(m.to_string());
             }
 
-            if jconf.plugin.is_none() {
-                if let Some(ref p) = m.plugin {
-                    jconf.plugin = Some(p.plugin.clone());
-                    if let Some(ref o) = p.plugin_opts {
-                        jconf.plugin_opts = Some(o.clone());
-                    }
-                    if !p.plugin_args.is_empty() {
-                        jconf.plugin_args = Some(p.plugin_args.clone());
-                    }
+            if jconf.plugin.is_none()
+                && let Some(ref p) = m.plugin
+            {
+                jconf.plugin = Some(p.plugin.clone());
+                if let Some(ref o) = p.plugin_opts {
+                    jconf.plugin_opts = Some(o.clone());
+                }
+                if !p.plugin_args.is_empty() {
+                    jconf.plugin_args = Some(p.plugin_args.clone());
                 }
             }
         }
@@ -3144,6 +3401,10 @@ impl fmt::Display for Config {
         jconf.outbound_bind_addr = self.outbound_bind_addr.map(|i| i.to_string());
         jconf.outbound_bind_interface.clone_from(&self.outbound_bind_interface);
         jconf.outbound_udp_allow_fragmentation = Some(self.outbound_udp_allow_fragmentation);
+        jconf.inbound_udp_allow_fragmentation = Some(self.inbound_udp_allow_fragmentation);
+        if jconf.outbound_proxy.is_none() {
+            jconf.outbound_proxy = SSOutboundProxyConfig::from_proxies(&self.outbound_proxy);
+        }
 
         // Security
         if self.security.replay_attack.policy != ReplayAttackPolicy::default() {
@@ -3187,19 +3448,43 @@ impl fmt::Display for Config {
 /// If value is in format `${VAR_NAME}` then it will try to read from `VAR_NAME` environment variable.
 /// It will return the original value if fails to read `${VAR_NAME}`.
 pub fn read_variable_field_value(value: &str) -> Cow<'_, str> {
-    if let Some(left_over) = value.strip_prefix("${") {
-        if let Some(var_name) = left_over.strip_suffix('}') {
-            match env::var(var_name) {
-                Ok(value) => return value.into(),
-                Err(err) => {
-                    warn!(
-                        "couldn't read password from environment variable {}, error: {}",
-                        var_name, err
-                    );
-                }
+    if let Some(left_over) = value.strip_prefix("${")
+        && let Some(var_name) = left_over.strip_suffix('}')
+    {
+        match env::var(var_name) {
+            Ok(value) => return value.into(),
+            Err(err) => {
+                warn!(
+                    "couldn't read password from environment variable {}, error: {}",
+                    var_name, err
+                );
             }
         }
     }
 
     value.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OutboundProxy;
+
+    #[test]
+    fn outbound_proxy_url_without_auth() {
+        let proxy = OutboundProxy::from_url("socks5://127.0.0.1:1080").expect("proxy");
+        assert_eq!(proxy.host, "127.0.0.1");
+        assert_eq!(proxy.port, 1080);
+        assert!(proxy.auth.is_none());
+        assert_eq!(proxy.to_url(), "socks5://127.0.0.1:1080");
+    }
+
+    #[test]
+    fn outbound_proxy_url_with_auth() {
+        let proxy = OutboundProxy::from_url("socks5://user:pass@[::1]:1080").expect("proxy");
+        assert_eq!(proxy.host, "::1");
+        assert_eq!(proxy.port, 1080);
+        let auth = proxy.auth.expect("auth");
+        assert_eq!(auth.username, "user");
+        assert_eq!(auth.password, "pass");
+    }
 }

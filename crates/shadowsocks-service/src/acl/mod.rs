@@ -208,13 +208,13 @@ impl ParsingRules {
                         return;
                     }
                 }
-            } else if let Some(set_rule) = caps.get(2) {
-                if let Ok(set_rule) = str::from_utf8(set_rule.as_bytes()) {
-                    let set_rule = set_rule.replace("\\.", ".");
-                    if self.add_set_rule_inner(&set_rule).is_ok() {
-                        trace!("REGEX-RULE {} => SET-RULE {}", rule, set_rule);
-                        return;
-                    }
+            } else if let Some(set_rule) = caps.get(2)
+                && let Ok(set_rule) = str::from_utf8(set_rule.as_bytes())
+            {
+                let set_rule = set_rule.replace("\\.", ".");
+                if self.add_set_rule_inner(&set_rule).is_ok() {
+                    trace!("REGEX-RULE {} => SET-RULE {}", rule, set_rule);
+                    return;
                 }
             }
         }
@@ -619,8 +619,8 @@ impl AccessControl {
                 // If no domain name rules matched,
                 // we need to resolve the hostname to IP addresses
 
-                // If mode is BlackList, host is allowed by default. If any of its' resolved IPs in outboud_block, then it is blocked.
-                // If mode is WhiteList, host is blocked by default. If any of its' resolved IPs in outbound_allow, then it is allowed.
+                // If mode is BlackList, host is allowed by default. If any of its resolved IPs is in outbound_block, then it is blocked.
+                // If mode is WhiteList, host is blocked by default. If any of its resolved IPs is in outbound_allow, then it is allowed.
                 let (check_rule, block_if_matched) = match self.outbound_mode {
                     Mode::BlackList => (&self.outbound_block, true),
                     Mode::WhiteList => (&self.outbound_allow, false),

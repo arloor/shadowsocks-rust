@@ -94,7 +94,7 @@ jobs:
       - name: Install LLVM and Clang
         run: sudo apt update && sudo apt install -y clang
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
@@ -131,7 +131,7 @@ jobs:
           ./build-release -t ${{ matrix.platform.target }} $compile_features $compile_compress $compile_nightly $compile_cargo_flags
 
       - name: Upload Github Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -153,7 +153,7 @@ jobs:
           - x86_64-apple-darwin
           - aarch64-apple-darwin
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install GNU tar
         if: runner.os == 'macOS'
@@ -176,7 +176,7 @@ jobs:
           ./build/build-host-release -t ${{ matrix.target }}
 
       - name: Upload Github Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -190,7 +190,7 @@ jobs:
       RUSTFLAGS: "-C target-feature=+crt-static"
       RUST_BACKTRACE: full
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ilammy/setup-nasm@v1
 
       - name: Install Rust
@@ -205,7 +205,7 @@ jobs:
           pwsh ./build/build-host-release.ps1 "full winservice"
 
       - name: Upload Github Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

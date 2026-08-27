@@ -1,12 +1,22 @@
 //! Shadowsocks Service Network Utilities
 
-pub use self::{flow::FlowStat, mon_socket::MonProxySocket, mon_stream::MonProxyStream};
+pub use self::{
+    flow::FlowStat,
+    mon_socket::MonProxySocket,
+    mon_stream::MonProxyStream,
+    outbound::{
+        HttpProxyAuth, OutboundProxyClient, OutboundProxyDatagram, OutboundProxyHop, OutboundProxyKind,
+        OutboundProxyStream, Socks5Auth, Socks5Negotiator, TcpDialer,
+    },
+};
 
 pub mod flow;
+pub mod http_stream;
 #[cfg(target_os = "macos")]
 pub mod launch_activate_socket;
 pub mod mon_socket;
 pub mod mon_stream;
+pub mod outbound;
 pub mod packet_window;
 pub mod utils;
 

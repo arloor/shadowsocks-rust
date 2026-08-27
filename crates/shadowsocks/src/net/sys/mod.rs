@@ -6,7 +6,7 @@ use std::{
 
 use cfg_if::cfg_if;
 use log::{debug, warn};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use socket2::{Domain, Protocol, SockAddr, SockRef, Socket, Type};
 use tokio::net::TcpSocket;
 
 use super::ConnectOpts;
@@ -71,17 +71,10 @@ fn set_common_sockopt_after_connect_sys(_: &tokio::net::TcpStream, _: &ConnectOp
 #[cfg(unix)]
 pub fn socket_bind_dual_stack<S>(socket: &S, addr: &SocketAddr, ipv6_only: bool) -> io::Result<()>
 where
-    S: std::os::unix::io::AsRawFd,
+    S: std::os::unix::io::AsFd,
 {
-    use std::os::unix::prelude::{FromRawFd, IntoRawFd};
-
-    let fd = socket.as_raw_fd();
-
-    let sock = unsafe { Socket::from_raw_fd(fd) };
-    let result = socket_bind_dual_stack_inner(&sock, addr, ipv6_only);
-    let _ = sock.into_raw_fd();
-
-    result
+    let sock = SockRef::from(socket);
+    socket_bind_dual_stack_inner(&sock, addr, ipv6_only)
 }
 
 /// Try to call `bind()` with dual-stack enabled.
@@ -90,17 +83,10 @@ where
 #[cfg(windows)]
 pub fn socket_bind_dual_stack<S>(socket: &S, addr: &SocketAddr, ipv6_only: bool) -> io::Result<()>
 where
-    S: std::os::windows::io::AsRawSocket,
+    S: std::os::windows::io::AsSocket,
 {
-    use std::os::windows::prelude::{FromRawSocket, IntoRawSocket};
-
-    let handle = socket.as_raw_socket();
-
-    let sock = unsafe { Socket::from_raw_socket(handle) };
-    let result = socket_bind_dual_stack_inner(&sock, addr, ipv6_only);
-    let _ = sock.into_raw_socket();
-
-    result
+    let sock = SockRef::from(socket);
+    socket_bind_dual_stack_inner(&sock, addr, ipv6_only)
 }
 
 fn socket_bind_dual_stack_inner(socket: &Socket, addr: &SocketAddr, ipv6_only: bool) -> io::Result<()> {
@@ -167,13 +153,13 @@ static IP_STACK_CAPABILITIES: LazyLock<IpStackCapabilities> = LazyLock::new(|| {
     }
 
     // Check IPv6 (::1)
-    if let Ok(ipv6_socket) = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP)) {
-        if ipv6_socket.set_only_v6(true).is_ok() {
-            let local_host = SockAddr::from(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0));
-            if ipv6_socket.bind(&local_host).is_ok() {
-                caps.support_ipv6 = true;
-                debug!("IpStackCapability support_ipv6=true");
-            }
+    if let Ok(ipv6_socket) = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP))
+        && ipv6_socket.set_only_v6(true).is_ok()
+    {
+        let local_host = SockAddr::from(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0));
+        if ipv6_socket.bind(&local_host).is_ok() {
+            caps.support_ipv6 = true;
+            debug!("IpStackCapability support_ipv6=true");
         }
     }
 

@@ -1,7 +1,7 @@
 use std::io;
 
 use cfg_if::cfg_if;
-use socket2::Socket;
+use socket2::SockRef;
 
 cfg_if! {
     if #[cfg(unix)] {
@@ -15,28 +15,18 @@ cfg_if! {
 #[allow(dead_code)]
 pub fn set_ipv6_only<S>(socket: &S, ipv6_only: bool) -> io::Result<()>
 where
-    S: std::os::unix::io::AsRawFd,
+    S: std::os::unix::io::AsFd,
 {
-    use std::os::unix::io::{FromRawFd, IntoRawFd};
-
-    let fd = socket.as_raw_fd();
-    let sock = unsafe { Socket::from_raw_fd(fd) };
-    let result = sock.set_only_v6(ipv6_only);
-    let _ = sock.into_raw_fd();
-    result
+    let sock = SockRef::from(socket);
+    sock.set_only_v6(ipv6_only)
 }
 
 #[cfg(windows)]
 #[allow(dead_code)]
 pub fn set_ipv6_only<S>(socket: &S, ipv6_only: bool) -> io::Result<()>
 where
-    S: std::os::windows::io::AsRawSocket,
+    S: std::os::windows::io::AsSocket,
 {
-    use std::os::windows::io::{FromRawSocket, IntoRawSocket};
-
-    let handle = socket.as_raw_socket();
-    let sock = unsafe { Socket::from_raw_socket(handle) };
-    let result = sock.set_only_v6(ipv6_only);
-    let _ = sock.into_raw_socket();
-    result
+    let sock = SockRef::from(socket);
+    sock.set_only_v6(ipv6_only)
 }

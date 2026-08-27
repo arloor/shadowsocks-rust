@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::future;
 use log::{debug, error, info, trace, warn};
 use lru_time_cache::LruCache;
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, rngs::SmallRng};
 use shadowsocks::{
     ServerConfig,
     config::ServerUser,
@@ -456,7 +456,7 @@ impl Drop for UdpAssociationContext {
 }
 
 thread_local! {
-    static CLIENT_SESSION_RNG: RefCell<SmallRng> = RefCell::new(SmallRng::from_os_rng());
+    static CLIENT_SESSION_RNG: RefCell<SmallRng> = RefCell::new(rand::make_rng());
 }
 
 #[inline]
@@ -593,14 +593,14 @@ impl UdpAssociationContext {
         data: &[u8],
         control: &Option<UdpSocketControlData>,
     ) {
-        if let Some(ref mut session) = self.client_session {
-            if peer_addr != self.peer_addr {
-                debug!(
-                    "udp relay for {} changed to {}, session: {:?}",
-                    self.peer_addr, peer_addr, session.client_session_id
-                );
-                self.peer_addr = peer_addr;
-            }
+        if let Some(ref mut session) = self.client_session
+            && peer_addr != self.peer_addr
+        {
+            debug!(
+                "udp relay for {} changed to {}, session: {:?}",
+                self.peer_addr, peer_addr, session.client_session_id
+            );
+            self.peer_addr = peer_addr;
         }
 
         trace!(
@@ -737,10 +737,10 @@ impl UdpAssociationContext {
         // It is an undefined behavior in shadowsocks' protocol about how to handle IPv4-mapped-IPv6.
         // But for some implementations, they may expect the target address to be IPv4, because
         // the peer address is IPv4 when calling `sendto`.
-        if let Address::SocketAddress(SocketAddr::V6(ref v6)) = addr {
-            if let Some(v4) = to_ipv4_mapped(v6.ip()) {
-                addr = Address::SocketAddress(SocketAddr::new(v4.into(), v6.port()));
-            }
+        if let Address::SocketAddress(SocketAddr::V6(ref v6)) = addr
+            && let Some(v4) = to_ipv4_mapped(v6.ip())
+        {
+            addr = Address::SocketAddress(SocketAddr::new(v4.into(), v6.port()));
         }
 
         match self.client_session {

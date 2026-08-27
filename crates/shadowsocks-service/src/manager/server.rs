@@ -329,20 +329,20 @@ impl Manager {
         };
 
         let pid_path = self.server_pid_path(port);
-        if pid_path.exists() {
-            if let Ok(mut pid_file) = File::open(&pid_path) {
-                let mut pid_content = String::new();
-                if pid_file.read_to_string(&mut pid_content).is_ok() {
-                    let pid_content = pid_content.trim();
+        if pid_path.exists()
+            && let Ok(mut pid_file) = File::open(&pid_path)
+        {
+            let mut pid_content = String::new();
+            if pid_file.read_to_string(&mut pid_content).is_ok() {
+                let pid_content = pid_content.trim();
 
-                    match pid_content.parse::<libc::pid_t>() {
-                        Ok(pid) => {
-                            let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
-                            debug!("killed standalone server port {}, pid: {}", port, pid);
-                        }
-                        Err(..) => {
-                            warn!("failed to read pid from {}", pid_path.display());
-                        }
+                match pid_content.parse::<libc::pid_t>() {
+                    Ok(pid) => {
+                        let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
+                        debug!("killed standalone server port {}, pid: {}", port, pid);
+                    }
+                    Err(..) => {
+                        warn!("failed to read pid from {}", pid_path.display());
                     }
                 }
             }
@@ -392,6 +392,8 @@ impl Manager {
             outbound_bind_addr: None,
             outbound_bind_interface: None,
             outbound_udp_allow_fragmentation: None,
+            inbound_udp_allow_fragmentation: None,
+            outbound_proxy: Vec::new(),
         };
 
         let mut config = Config::new(ConfigType::Server);

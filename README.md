@@ -42,7 +42,7 @@ git merge upstream/master
 [![Release](https://img.shields.io/github/release/shadowsocks/shadowsocks-rust.svg)](https://github.com/shadowsocks/shadowsocks-rust/releases)
 [![shadowsocks-rust](https://img.shields.io/archlinux/v/extra/x86_64/shadowsocks-rust)](https://archlinux.org/packages/extra/x86_64/shadowsocks-rust/)
 [![aur shadowsocks-rust-git](https://img.shields.io/aur/version/shadowsocks-rust-git)](https://aur.archlinux.org/packages/shadowsocks-rust-git)
-[![NixOS](https://img.shields.io/badge/NixOS-shadowsocks--rust-blue?logo=nixos)](https://github.com/NixOS/nixpkgs/tree/master/pkgs/tools/networking/shadowsocks-rust)
+[![NixOS](https://img.shields.io/badge/NixOS-shadowsocks--rust-blue?logo=nixos)](https://github.com/NixOS/nixpkgs/blob/master/pkgs/by-name/sh/shadowsocks-rust/package.nix)
 [![snap shadowsocks-rust](https://snapcraft.io/shadowsocks-rust/badge.svg)](https://snapcraft.io/shadowsocks-rust)
 [![homebrew shadowsocks-rust](https://img.shields.io/homebrew/v/shadowsocks-rust)](https://formulae.brew.sh/formula/shadowsocks-rust#default)
 [![MacPorts shadowsocks-rust](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fports.macports.org%2Fapi%2Fv1%2Fports%2Fshadowsocks-rust%2F&query=%24.version&label=macports)](https://ports.macports.org/port/shadowsocks-rust/)
@@ -403,6 +403,24 @@ Start local client with configuration file
 sslocal -c /path/to/shadowsocks.json
 ```
 
+`sslocal` also supports routing its outbound TCP connection to the Shadowsocks server through a proxy or proxy chain with the `outbound_proxy` config key. Supported hop types are `socks5://`, `http://`, and `https://`, with optional `user:pass@` credentials. This option is currently available through the configuration file for `sslocal`; `ssserver` supports both the config file and repeated `--outbound-proxy` command line flags.
+
+```jsonc
+{
+    "server": "server.example.com",
+    "server_port": 8388,
+    "password": "hello-kitty",
+    "method": "aes-256-gcm",
+    "local_address": "127.0.0.1",
+    "local_port": 1080,
+    "outbound_proxy": [
+        "socks5://user:pass@127.0.0.1:1080",
+        "https://proxy.example.com:443",
+        "http://127.0.0.1:1081"
+    ]
+}
+```
+
 ### Socks5 Local client
 
 ```bash
@@ -447,6 +465,40 @@ Redirects connections with `iptables` configurations to the port that `sslocal` 
 - `--protocol redir` enables local client Redir mode
 - (optional) `--tcp-redir` sets TCP mode to `REDIRECT` (Linux)
 - (optional) `--udp-redir` sets UDP mode to `TPROXY` (Linux)
+
+#### Linux iptables example
+
+`iptables` transparent redirection must point to a `redir` listener. Do not redirect traffic to a `socks` or `http`
+listener, because `REDIRECT`/`TPROXY` sends the original TCP/UDP flow without a SOCKS handshake or HTTP `CONNECT`
+request. Use `--protocol socks` or `--protocol http` only for applications that can speak those proxy protocols
+directly.
+
+For a minimal TCP-only setup on the local machine:
+
+```bash
+# Start sslocal in redir mode. The fwmark lets iptables skip sslocal's own
+# outbound connection to the Shadowsocks server and avoid a proxy loop.
+sudo sslocal -b "127.0.0.1:60080" --protocol redir \
+    -s "server.example.com:8388" -m "aes-256-gcm" -k "hello-kitty" \
+    --tcp-redir "redirect" --outbound-fwmark 255
+
+# Redirect locally generated TCP connections to sslocal.
+sudo iptables -t nat -N shadowsocks-redir
+for addr in 0/8 10/8 100.64/10 127/8 169.254/16 172.16/12 192.168/16 224/4 240/4; do
+    sudo iptables -t nat -A shadowsocks-redir -d "$addr" -j RETURN
+done
+sudo iptables -t nat -A shadowsocks-redir -m mark --mark 0xff/0xff -j RETURN
+sudo iptables -t nat -A shadowsocks-redir -p tcp -j REDIRECT --to-ports 60080
+sudo iptables -t nat -A OUTPUT -p tcp -j shadowsocks-redir
+```
+
+For TCP+UDP, LAN gateway, IPv6, or ipset-based routing, adapt the examples in
+[`configs/iptables_mixed.sh`](configs/iptables_mixed.sh) or [`configs/iptables_tproxy.sh`](configs/iptables_tproxy.sh)
+and run `sslocal` with `--tcp-redir "tproxy" --udp-redir "tproxy"`.
+
+If the Shadowsocks server itself must be reached through an HTTP or SOCKS proxy, combine redir mode with the
+`outbound_proxy` configuration option. This routes `sslocal`'s outbound TCP connection through that proxy; UDP traffic
+is not proxied by `outbound_proxy`.
 
 ### Tun interface client
 
@@ -519,7 +571,16 @@ ssserver -c /path/to/shadowsocks.json
 
 # Pass all parameters via command line
 ssserver -s "[::]:8388" -m "aes-256-gcm" -k "hello-kitty" --plugin "v2ray-plugin" --plugin-opts "server;tls;host=github.com"
+
+# Route outbound TCP traffic through a proxy chain
+ssserver -s "[::]:8388" -m "aes-256-gcm" -k "hello-kitty" \
+  --outbound-proxy socks5://user:pass@127.0.0.1:1080 \
+  --outbound-proxy https://proxy.example.com:443 \
+  --outbound-proxy http://127.0.0.1:1081
 ```
+
+Repeat `--outbound-proxy` in hop order. A single occurrence keeps the previous single-hop behavior.
+Supported hop types are `socks5://`, `http://`, and `https://`. The same `outbound_proxy` setting can also be used in configuration files for both `sslocal` and `ssserver`, but UDP traffic is not proxied.
 
 ### Server Manager
 
@@ -645,7 +706,10 @@ Example configuration:
             "local_address": "127.0.0.1",
             "local_port": 3128,
             // OPTIONAL. macOS launchd activate socket
-            "launchd_tcp_socket_name": "TCPListener"
+            "launchd_tcp_socket_name": "TCPListener",
+            // OPTIONAL. Authentication configuration file
+            // Configuration file document could be found in the next section.
+            "http_auth_config_path": "/path/to/auth.json",
         },
         {
             // DNS local server (feature = "local-dns")
@@ -809,6 +873,22 @@ Example configuration:
             "outbound_bind_addr": "11.22.33.44",
             // Outbound UDP socket allows IP fragmentation (default false)
             "outbound_udp_allow_fragmentation": false,
+            // Inbound UDP socket allows IP fragmentation (default false)
+            "inbound_udp_allow_fragmentation": false,
+            // Route outbound TCP connections through a proxy or proxy chain
+            // (TCP only; UDP is not proxied)
+            // Works for both sslocal and ssserver
+            // sslocal: configure in JSON; ssserver: JSON or repeated --outbound-proxy
+            // Single hop:
+            "outbound_proxy": "socks5://127.0.0.1:1080",
+            // Single hop with username/password:
+            // "outbound_proxy": "socks5://user:pass@127.0.0.1:1080",
+            // Multi-hop:
+            // "outbound_proxy": [
+            //     "socks5://user:pass@127.0.0.1:1080",
+            //     "https://proxy.example.com:443",
+            //     "http://127.0.0.1:1081"
+            // ],
         }
     ],
 
@@ -873,6 +953,20 @@ Example configuration:
     "outbound_bind_addr": "11.22.33.44",
     // Outbound UDP socket allows IP fragmentation (default false)
     "outbound_udp_allow_fragmentation": false,
+    // Route outbound TCP connections through a proxy or proxy chain
+    // (TCP only; UDP is not proxied)
+    // Works for both sslocal and ssserver
+    // sslocal: configure in JSON; ssserver: JSON or repeated --outbound-proxy
+    // Single hop:
+    "outbound_proxy": "socks5://127.0.0.1:1080",
+    // Single hop with username/password:
+    // "outbound_proxy": "socks5://user:pass@127.0.0.1:1080",
+    // Multi-hop:
+    // "outbound_proxy": [
+    //     "socks5://user:pass@127.0.0.1:1080",
+    //     "https://proxy.example.com:443",
+    //     "http://127.0.0.1:1081"
+    // ],
 
     // Balancer customization
     "balancer": {
@@ -944,6 +1038,17 @@ Example configuration:
                     // Optional. If set, keeps the last N log files
                     "max_files": 5
                 }
+            },
+            {
+                // Configure a syslog writer, only supported on *nix system
+                "syslog": {
+                    // `level` and `format` can also be set here, if not set, it will use the default values
+
+                    // Optional. Set the "identity" when calling openlog(). Use current service name by default.
+                    "identity": "identity_name",
+                    // Optional. Set the "facility" when calling openlog(). 1 (user-level messages) by default. See RFC5424.
+                    "facility": 1
+                }
             }
         ]
     },
@@ -965,6 +1070,24 @@ The configuration file is set by `socks5_auth_config_path` in `locals`.
 {
     // Password/Username Authentication (RFC1929)
     "password": {
+        "users": [
+            {
+                "user_name": "USERNAME in UTF-8",
+                "password": "PASSWORD in UTF-8"
+            }
+        ]
+    }
+}
+```
+
+### HTTP Authentication Configuration
+
+The configuration file is set by `http_auth_config_path` in `locals`.
+
+```jsonc
+{
+    // Basic Authentication (RFC9110)
+    "basic": {
         "users": [
             {
                 "user_name": "USERNAME in UTF-8",
@@ -1025,17 +1148,17 @@ These Ciphers require `"password"` to be a Base64 string of key that have **exac
 
 - For local servers (`sslocal`, `ssredir`, ...)
   - Modes:
-    - `[bypass_all]` - ACL runs in `WhiteList` mode. Bypasses all addresses except those matched any rules.
-    - `[proxy_all]` - ACL runs in `BlackList` mode. Proxies all addresses except those matched any rules. (default)
+    - `[bypass_all]` - ACL runs in `WhiteList` mode. Bypasses all addresses except those matching any rules.
+    - `[proxy_all]` - ACL runs in `BlackList` mode. Proxies all addresses except those matching any rules. (default)
   - Rules:
     - `[bypass_list]` - Rules for connecting directly
     - `[proxy_list]` - Rules for connecting through proxies
 - For remote servers (`ssserver`)
   - Modes:
-    - `[reject_all]` - ACL runs in `WhiteList` mode. Rejects all clients except those matched any rules.
-    - `[accept_all]` - ACL runs in `BlackList` mode. Accepts all clients except those matched any rules. (default)
-    - `[outbound_block_all]` - Outbound ACL runs in `WhiteList` mode. Blockes all outbound addresses except those matched any rules.
-    - `[outbound_allow_all]` - Outbound ACL runs in `BlackList` mode. Allows all outbound addresses except those matched any rules. (default)
+    - `[reject_all]` - ACL runs in `WhiteList` mode. Rejects all clients except those matching any rules.
+    - `[accept_all]` - ACL runs in `BlackList` mode. Accepts all clients except those matching any rules. (default)
+    - `[outbound_block_all]` - Outbound ACL runs in `WhiteList` mode. Blocks all outbound addresses except those matching any rules.
+    - `[outbound_allow_all]` - Outbound ACL runs in `BlackList` mode. Allows all outbound addresses except those matching any rules. (default)
   - Rules:
     - `[white_list]` - Rules for accepted clients
     - `[black_list]` - Rules for rejected clients

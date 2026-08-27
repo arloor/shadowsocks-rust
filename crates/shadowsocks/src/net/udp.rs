@@ -5,6 +5,8 @@
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
+    target_os = "tvos",
     target_os = "freebsd"
 ))]
 use std::io::{ErrorKind, IoSlice, IoSliceMut};
@@ -20,6 +22,8 @@ use std::{
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
+    target_os = "tvos",
     target_os = "freebsd"
 ))]
 use futures::future;
@@ -30,16 +34,18 @@ use futures::ready;
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
+    target_os = "tvos",
     target_os = "freebsd"
 ))]
 use tokio::io::Interest;
 use tokio::{io::ReadBuf, net::ToSocketAddrs};
 
-use crate::{context::Context, relay::socks5::Address, ServerAddr};
+use crate::{ServerAddr, context::Context, relay::socks5::Address};
 
 use super::{
-    sys::{bind_outbound_udp_socket, create_inbound_udp_socket, create_outbound_udp_socket},
     AcceptOpts, AddrFamily, ConnectOpts,
+    sys::{bind_outbound_udp_socket, create_inbound_udp_socket, create_outbound_udp_socket},
 };
 
 /// Message struct for `batch_send`
@@ -48,6 +54,8 @@ use super::{
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
+    target_os = "tvos",
     target_os = "freebsd"
 ))]
 pub struct BatchSendMessage<'a> {
@@ -65,6 +73,8 @@ pub struct BatchSendMessage<'a> {
     target_os = "android",
     target_os = "macos",
     target_os = "ios",
+    target_os = "watchos",
+    target_os = "tvos",
     target_os = "freebsd"
 ))]
 pub struct BatchRecvMessage<'a> {
@@ -179,7 +189,7 @@ impl UdpSocket {
 
     /// Binds to a specific address (inbound)
     pub async fn listen_with_opts(addr: &SocketAddr, opts: AcceptOpts) -> io::Result<Self> {
-        let socket = create_inbound_udp_socket(addr, opts.ipv6_only).await?;
+        let socket = create_inbound_udp_socket(addr, opts.ipv6_only, opts.udp.allow_fragmentation).await?;
         Ok(Self {
             socket,
             mtu: opts.udp.mtu,
@@ -189,10 +199,10 @@ impl UdpSocket {
     /// Wrapper of `UdpSocket::poll_send`
     pub fn poll_send(&self, cx: &mut TaskContext<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         // Check MTU
-        if let Some(mtu) = self.mtu {
-            if buf.len() > mtu {
-                return Err(make_mtu_error(buf.len(), mtu)).into();
-            }
+        if let Some(mtu) = self.mtu
+            && buf.len() > mtu
+        {
+            return Err(make_mtu_error(buf.len(), mtu)).into();
         }
 
         self.socket.poll_send(cx, buf)
@@ -202,10 +212,10 @@ impl UdpSocket {
     #[inline]
     pub async fn send(&self, buf: &[u8]) -> io::Result<usize> {
         // Check MTU
-        if let Some(mtu) = self.mtu {
-            if buf.len() > mtu {
-                return Err(make_mtu_error(buf.len(), mtu));
-            }
+        if let Some(mtu) = self.mtu
+            && buf.len() > mtu
+        {
+            return Err(make_mtu_error(buf.len(), mtu));
         }
 
         self.socket.send(buf).await
@@ -214,10 +224,10 @@ impl UdpSocket {
     /// Wrapper of `UdpSocket::poll_send_to`
     pub fn poll_send_to(&self, cx: &mut TaskContext<'_>, buf: &[u8], target: SocketAddr) -> Poll<io::Result<usize>> {
         // Check MTU
-        if let Some(mtu) = self.mtu {
-            if buf.len() > mtu {
-                return Err(make_mtu_error(buf.len(), mtu)).into();
-            }
+        if let Some(mtu) = self.mtu
+            && buf.len() > mtu
+        {
+            return Err(make_mtu_error(buf.len(), mtu)).into();
         }
 
         self.socket.poll_send_to(cx, buf, target)
@@ -227,10 +237,10 @@ impl UdpSocket {
     #[inline]
     pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], target: A) -> io::Result<usize> {
         // Check MTU
-        if let Some(mtu) = self.mtu {
-            if buf.len() > mtu {
-                return Err(make_mtu_error(buf.len(), mtu));
-            }
+        if let Some(mtu) = self.mtu
+            && buf.len() > mtu
+        {
+            return Err(make_mtu_error(buf.len(), mtu));
         }
 
         self.socket.send_to(buf, target).await
@@ -241,10 +251,10 @@ impl UdpSocket {
     pub fn poll_recv(&self, cx: &mut TaskContext<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         ready!(self.socket.poll_recv(cx, buf))?;
 
-        if let Some(mtu) = self.mtu {
-            if buf.filled().len() > mtu {
-                return Err(make_mtu_error(buf.filled().len(), mtu)).into();
-            }
+        if let Some(mtu) = self.mtu
+            && buf.filled().len() > mtu
+        {
+            return Err(make_mtu_error(buf.filled().len(), mtu)).into();
         }
 
         Ok(()).into()
@@ -255,10 +265,10 @@ impl UdpSocket {
     pub async fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.socket.recv(buf).await?;
 
-        if let Some(mtu) = self.mtu {
-            if n > mtu {
-                return Err(make_mtu_error(n, mtu));
-            }
+        if let Some(mtu) = self.mtu
+            && n > mtu
+        {
+            return Err(make_mtu_error(n, mtu));
         }
 
         Ok(n)
@@ -269,10 +279,10 @@ impl UdpSocket {
     pub fn poll_recv_from(&self, cx: &mut TaskContext<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<SocketAddr>> {
         let addr = ready!(self.socket.poll_recv_from(cx, buf))?;
 
-        if let Some(mtu) = self.mtu {
-            if buf.filled().len() > mtu {
-                return Err(make_mtu_error(buf.filled().len(), mtu)).into();
-            }
+        if let Some(mtu) = self.mtu
+            && buf.filled().len() > mtu
+        {
+            return Err(make_mtu_error(buf.filled().len(), mtu)).into();
         }
 
         Ok(addr).into()
@@ -283,10 +293,10 @@ impl UdpSocket {
     pub async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
         let (n, addr) = self.socket.recv_from(buf).await?;
 
-        if let Some(mtu) = self.mtu {
-            if n > mtu {
-                return Err(make_mtu_error(n, mtu));
-            }
+        if let Some(mtu) = self.mtu
+            && n > mtu
+        {
+            return Err(make_mtu_error(n, mtu));
         }
 
         Ok((n, addr))
@@ -298,6 +308,8 @@ impl UdpSocket {
         target_os = "android",
         target_os = "macos",
         target_os = "ios",
+        target_os = "watchos",
+        target_os = "tvos",
         target_os = "freebsd"
     ))]
     pub fn poll_batch_send(
@@ -327,6 +339,8 @@ impl UdpSocket {
         target_os = "android",
         target_os = "macos",
         target_os = "ios",
+        target_os = "watchos",
+        target_os = "tvos",
         target_os = "freebsd"
     ))]
     pub async fn batch_send(&self, msgs: &mut [BatchSendMessage<'_>]) -> io::Result<usize> {
@@ -339,6 +353,8 @@ impl UdpSocket {
         target_os = "android",
         target_os = "ios",
         target_os = "macos",
+        target_os = "watchos",
+        target_os = "tvos",
         target_os = "freebsd"
     ))]
     pub fn poll_batch_recv(
@@ -368,6 +384,8 @@ impl UdpSocket {
         target_os = "android",
         target_os = "macos",
         target_os = "ios",
+        target_os = "watchos",
+        target_os = "tvos",
         target_os = "freebsd"
     ))]
     pub async fn batch_recv(&self, msgs: &mut [BatchRecvMessage<'_>]) -> io::Result<usize> {

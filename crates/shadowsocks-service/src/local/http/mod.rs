@@ -7,9 +7,9 @@ pub use self::{
     server::{Http, HttpBuilder, HttpConnectionHandler},
 };
 
+pub mod config;
 mod http_client;
 mod http_service;
-mod http_stream;
 pub mod server;
-mod tokio_rt;
+pub(crate) mod tokio_rt;
 mod utils;

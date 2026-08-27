@@ -1,9 +1,11 @@
-FROM --platform=$BUILDPLATFORM rust:1.91.1-alpine3.22 AS builder
+FROM --platform=$BUILDPLATFORM rust:1.98.0-alpine3.23 AS builder
 
 ARG TARGETARCH
+ARG BUILDARCH
 
 RUN set -x \
-    && apk add --no-cache musl-dev
+    && apk add --no-cache musl-dev gcc \
+    && echo "Building for ${TARGETARCH} on ${BUILDARCH}"
 
 WORKDIR /root/shadowsocks-rust
 
@@ -33,14 +35,21 @@ RUN case "$TARGETARCH" in \
     && wget "https://github.com/AaronChen0/musl-cc-mirror/releases/download/2021-09-23/$MUSL-cross.tgz" \
     && ( echo "$SHA512" "$MUSL-cross.tgz" | sha512sum -c ) \
     && tar -xzf "$MUSL-cross.tgz" -C /root/ \
-    && PATH="/root/$MUSL-cross/bin:$PATH" \
-    && CC=/root/$MUSL-cross/bin/$MUSL-gcc \
+    && CROSS="/root/$MUSL-cross/bin/$MUSL-gcc" \
+    && if [ -x "$CROSS" ] && "$CROSS" --version >/dev/null 2>&1; then \
+        CC="/root/$MUSL-cross/bin/$MUSL-gcc"; \
+        PATH="/root/$MUSL-cross/bin:$PATH"; \
+        echo "INFO: Using downloaded cross toolchain: $CC"; \
+    else \
+        CC="gcc"; \
+        echo "WARN: downloaded cross toolchain is not executable on this builder, fallback to native gcc"; \
+    fi \
     && echo "CC=$CC" \
     && rustup target add "$RUST_TARGET" \
     && RUSTFLAGS="-C linker=$CC" CC=$CC cargo build --target "$RUST_TARGET" --release --features "full" \
     && mv target/$RUST_TARGET/release/ss* target/release/
 
-FROM alpine:3.22 AS sslocal
+FROM alpine:3.24 AS sslocal
 
 # NOTE: Please be careful to change the path of these binaries, refer to #1149 for more information.
 COPY --from=builder /root/shadowsocks-rust/target/release/sslocal /usr/bin/
@@ -50,7 +59,7 @@ COPY --from=builder /root/shadowsocks-rust/docker/docker-entrypoint.sh /usr/bin/
 ENTRYPOINT [ "docker-entrypoint.sh" ]
 CMD [ "sslocal", "--log-without-time", "-c", "/etc/shadowsocks-rust/config.json" ]
 
-FROM alpine:3.22 AS ssserver
+FROM alpine:3.24 AS ssserver
 
 COPY --from=builder /root/shadowsocks-rust/target/release/ssserver /usr/bin/
 COPY --from=builder /root/shadowsocks-rust/examples/config.json /etc/shadowsocks-rust/

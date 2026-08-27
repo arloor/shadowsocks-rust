@@ -18,18 +18,114 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::{
     local::{context::ServiceContext, loadbalancing::ServerIdent},
-    net::MonProxyStream,
+    net::{MonProxyStream, OutboundProxyStream, TcpDialer},
 };
 pub struct BasicAuth(pub String);
 use super::auto_proxy_io::AutoProxyIo;
+
+/// Outbound transport used by [`AutoProxyClientStream`]: either a direct
+/// TCP connection or a tunnel through the configured outbound proxy chain.
+#[allow(clippy::large_enum_variant)]
+#[pin_project(project = OutboundTransportProj)]
+pub enum OutboundTransport {
+    /// Direct TCP, no outbound chain configured.
+    Direct(#[pin] TcpStream),
+    /// Tunnel produced by `OutboundProxyClient::connect_tcp`.
+    Chained(#[pin] OutboundProxyStream),
+}
+
+impl OutboundTransport {
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        match self {
+            Self::Direct(s) => s.local_addr(),
+            Self::Chained(s) => s.local_addr(),
+        }
+    }
+
+    fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        match self {
+            Self::Direct(s) => s.set_nodelay(nodelay),
+            // For tunnels we can only forward the request to the underlying
+            // TCP socket if it is exposed; the unified enum has no such
+            // accessor today, so the call is a no-op.
+            Self::Chained(_) => Ok(()),
+        }
+    }
+}
+
+impl AsyncRead for OutboundTransport {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        match self.project() {
+            OutboundTransportProj::Direct(s) => s.poll_read(cx, buf),
+            OutboundTransportProj::Chained(s) => s.poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for OutboundTransport {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        match self.project() {
+            OutboundTransportProj::Direct(s) => s.poll_write(cx, buf),
+            OutboundTransportProj::Chained(s) => s.poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
+        match self.project() {
+            OutboundTransportProj::Direct(s) => s.poll_flush(cx),
+            OutboundTransportProj::Chained(s) => s.poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
+        match self.project() {
+            OutboundTransportProj::Direct(s) => s.poll_shutdown(cx),
+            OutboundTransportProj::Chained(s) => s.poll_shutdown(cx),
+        }
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        match self.project() {
+            OutboundTransportProj::Direct(s) => s.poll_write_vectored(cx, bufs),
+            OutboundTransportProj::Chained(s) => s.poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Direct(s) => s.is_write_vectored(),
+            Self::Chained(s) => s.is_write_vectored(),
+        }
+    }
+}
+
+/// `TcpDialer` adapter that dials directly via the shadowsocks
+/// infrastructure (DNS resolver, connect options).
+struct DirectTcpDialer<'a> {
+    context: &'a ServiceContext,
+    opts: &'a ConnectOpts,
+}
+
+impl<'a> TcpDialer for DirectTcpDialer<'a> {
+    async fn dial(&self, addr: &Address) -> io::Result<TcpStream> {
+        TcpStream::connect_remote_with_opts(self.context.context_ref(), addr, self.opts).await
+    }
+}
 
 /// Unified stream for bypassed and proxied connections
 #[allow(clippy::large_enum_variant)]
 #[pin_project(project = AutoProxyClientStreamProj)]
 pub enum AutoProxyClientStream {
-    Proxied(#[pin] ProxyClientStream<MonProxyStream<TcpStream>>),
+    /// Tunnel through the shadowsocks server (optionally over the outbound
+    /// proxy chain).
+    Proxied(#[pin] ProxyClientStream<MonProxyStream<OutboundTransport>>),
     #[cfg(feature = "https-tunnel")]
     HttpTunnel(#[pin] HttpTunnelStream),
+    /// Direct TCP, bypassing the shadowsocks server.
     Bypassed(#[pin] TcpStream),
 }
 
@@ -214,7 +310,6 @@ impl AutoProxyClientStream {
     where
         A: Into<Address>,
     {
-        // Connect directly.
         #[cfg_attr(not(feature = "local-fake-dns"), allow(unused_mut))]
         let mut addr = addr.into();
         #[cfg(feature = "local-fake-dns")]
@@ -274,21 +369,35 @@ impl AutoProxyClientStream {
         A: Into<Address>,
     {
         let flow_stat = context.flow_stat();
-        let stream = match ProxyClientStream::connect_with_opts_map(
-            context.context(),
-            server.server_config(),
-            addr,
-            connect_opts,
-            |stream| MonProxyStream::from_stream(stream, flow_stat),
-        )
-        .await
-        {
-            Ok(s) => s,
+        let target_addr: Address = addr.into();
+        let ss_addr: Address = server.server_config().tcp_external_addr().into();
+
+        let dial_result = match context.outbound_client() {
+            None => TcpStream::connect_remote_with_opts(context.context_ref(), &ss_addr, connect_opts)
+                .await
+                .map(OutboundTransport::Direct),
+            Some(client) => {
+                let dialer = DirectTcpDialer {
+                    context: context.as_ref(),
+                    opts: connect_opts,
+                };
+                client
+                    .connect_tcp(&dialer, &ss_addr)
+                    .await
+                    .map(OutboundTransport::Chained)
+            }
+        };
+
+        let transport = match dial_result {
+            Ok(t) => t,
             Err(err) => {
                 server.tcp_score().report_failure().await;
                 return Err(err);
             }
         };
+
+        let mon = MonProxyStream::from_stream(transport, flow_stat);
+        let stream = ProxyClientStream::from_stream(context.context(), mon, server.server_config(), target_addr);
         Ok(Self::Proxied(stream))
     }
 
@@ -429,11 +538,5 @@ impl AsyncWrite for AutoProxyClientStream {
             #[cfg(feature = "https-tunnel")]
             AutoProxyClientStreamProj::HttpTunnel(s) => s.project().stream.poll_write_vectored(cx, bufs),
         }
-    }
-}
-
-impl From<ProxyClientStream<MonProxyStream<TcpStream>>> for AutoProxyClientStream {
-    fn from(s: ProxyClientStream<MonProxyStream<TcpStream>>) -> Self {
-        Self::Proxied(s)
     }
 }

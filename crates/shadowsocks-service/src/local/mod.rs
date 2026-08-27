@@ -157,6 +157,7 @@ impl Server {
         accept_opts.tcp.keepalive = config.keep_alive.or(Some(LOCAL_DEFAULT_KEEPALIVE_TIMEOUT));
         accept_opts.tcp.mptcp = config.mptcp;
         accept_opts.udp.mtu = config.udp_mtu;
+        accept_opts.udp.allow_fragmentation = config.inbound_udp_allow_fragmentation;
         context.set_accept_opts(accept_opts);
 
         if let Some(resolver) = build_dns_resolver(
@@ -179,6 +180,20 @@ impl Server {
         }
 
         context.set_security_config(&config.security);
+
+        if !config.outbound_proxy.is_empty() {
+            let has_udp = config.local.iter().any(|local| local.config.mode.enable_udp());
+            if has_udp {
+                let preview = crate::net::OutboundProxyClient::from_config(&config.outbound_proxy);
+                if !preview.supports_udp() {
+                    log::warn!(
+                        "outbound proxy chain contains non-SOCKS5 hop(s); UDP traffic will bypass the chain. \
+                         Configure a SOCKS5-only chain to enable UDP relay."
+                    );
+                }
+            }
+            context.set_outbound_proxies(config.outbound_proxy);
+        }
 
         assert!(!config.local.is_empty(), "no valid local server configuration");
 
@@ -279,6 +294,8 @@ impl Server {
                     let mut server_builder = SocksBuilder::with_context(context.clone(), client_addr, balancer);
                     server_builder.set_mode(local_config.mode);
                     server_builder.set_socks5_auth(local_config.socks5_auth);
+                    #[cfg(feature = "local-http")]
+                    server_builder.set_http_auth(local_config.http_auth);
 
                     if let Some(c) = config.udp_max_associations {
                         server_builder.set_udp_capacity(c);
@@ -349,6 +366,7 @@ impl Server {
 
                     #[allow(unused_mut)]
                     let mut builder = HttpBuilder::with_context(context.clone(), client_addr, balancer);
+                    builder.set_http_auth(local_config.http_auth);
 
                     #[cfg(target_os = "macos")]
                     if let Some(n) = local_config.launchd_tcp_socket_name {

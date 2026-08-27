@@ -38,7 +38,7 @@ pub struct UdpSocketOpts {
     /// NOTE: MTU includes IP header, UDP header, UDP payload
     pub mtu: Option<usize>,
 
-    /// Outbound UDP socket allows IP fragmentation
+    /// UDP socket allows IP fragmentation
     pub allow_fragmentation: bool,
 }
 
@@ -122,7 +122,7 @@ pub mod android {
     use sealed::sealed;
     use std::{fmt, io, os::unix::io::RawFd};
 
-    /// Android VPN socket protect implemetation
+    /// Android VPN socket protect implementation
     #[sealed]
     pub trait SocketProtect {
         /// Protects the socket file descriptor by calling `VpnService.protect(fd)`

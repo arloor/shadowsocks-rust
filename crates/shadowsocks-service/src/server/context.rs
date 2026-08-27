@@ -10,7 +10,12 @@ use shadowsocks::{
     relay::Address,
 };
 
-use crate::{acl::AccessControl, config::SecurityConfig, net::FlowStat};
+use crate::config::OutboundProxy;
+use crate::{
+    acl::AccessControl,
+    config::SecurityConfig,
+    net::{FlowStat, OutboundProxyClient},
+};
 
 /// Server Service Context
 #[derive(Clone)]
@@ -23,6 +28,9 @@ pub struct ServiceContext {
 
     // Flow statistic report
     flow_stat: Arc<FlowStat>,
+
+    // Outbound proxy chain (resolved into a reusable client)
+    outbound_client: Option<Arc<OutboundProxyClient>>,
 }
 
 impl Default for ServiceContext {
@@ -32,6 +40,7 @@ impl Default for ServiceContext {
             connect_opts: ConnectOpts::default(),
             acl: None,
             flow_stat: Arc::new(FlowStat::new()),
+            outbound_client: None,
         }
     }
 }
@@ -60,6 +69,20 @@ impl ServiceContext {
     /// Get `ConnectOpts` reference
     pub fn connect_opts_ref(&self) -> &ConnectOpts {
         &self.connect_opts
+    }
+
+    /// Set outbound proxy chain
+    pub fn set_outbound_proxies(&mut self, proxies: Vec<OutboundProxy>) {
+        self.outbound_client = if proxies.is_empty() {
+            None
+        } else {
+            Some(Arc::new(OutboundProxyClient::from_config(&proxies)))
+        };
+    }
+
+    /// Get the outbound proxy client (if a chain is configured).
+    pub fn outbound_client(&self) -> Option<&Arc<OutboundProxyClient>> {
+        self.outbound_client.as_ref()
     }
 
     /// Set Access Control List

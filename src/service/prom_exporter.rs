@@ -1,7 +1,7 @@
 use std::{error::Error, time::Duration};
 
 use axum::{Router, extract::MatchedPath, response::Html, routing::get};
-use axum_bootstrap::error::AppError;
+use axum_bootstrap::{error::AppError, generate_shutdown_receiver};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 
 use shadowsocks_service::server::METRICS;
@@ -17,19 +17,11 @@ pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(if !cfg!(debug_ass
 pub(crate) async fn prom_exporter(port: u16) -> Result<(), DynError> {
     log::info!("Starting Prometheus exporter on port {}", port);
     let router = build_router();
-    axum_bootstrap::new_server(port, router)
+    axum_bootstrap::new_server(port, router, generate_shutdown_receiver())
         .with_timeout(IDLE_TIMEOUT)
-        // .with_tls_param(match config.over_tls {
-        //     true => Some(TlsParam {
-        //         tls: true,
-        //         cert: config.cert.to_string(),
-        //         key: config.key.to_string(),
-        //     }),
-        //     false => None,
-        // })
-        // .with_interceptor(ProxyInterceptor(proxy_handler))
         .run()
         .await
+        .map_err(Into::into)
 }
 
 fn build_router() -> Router {
@@ -53,7 +45,7 @@ fn build_router() -> Router {
                 // logging of errors so disable that
                 .on_failure(()),
             CorsLayer::permissive(),
-            TimeoutLayer::new(Duration::from_secs(30)),
+            TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(30)),
             CompressionLayer::new(),
         ));
 

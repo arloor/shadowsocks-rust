@@ -1,3 +1,60 @@
+shadowsocks-rust (1.25.0) unstable; urgency=medium
+
+  ## Breaking Changes
+
+  - MSRV bumps to v1.91, required by `smoltcp` v0.13
+  - `refactor(service)!: rework outbound proxy chain into a unified client`. The outbound proxy architecture has been completely reworked into a single self-contained module `net::outbound`, exposing `OutboundProxyClient`, `OutboundProxyStream`, `Socks5Auth`, `HttpProxyAuth` and a `TcpDialer` trait.
+    - `crate::net::outbound_proxy` — removed; use `crate::net::OutboundProxyClient`
+    - `crate::net::http_connect::HttpConnectClient` — moved to `crate::net::HttpConnectClient` (only available with the `local-http` feature)
+    - `crate::net::Socks5TcpClient` (the chain-mixing wrapper) — split: the pure SOCKS5 client is now `crate::local::socks::client::socks5::Socks5TcpClient`; the in-band negotiator is `crate::net::Socks5Negotiator`
+    - `crate::local::net::tcp::outbound_proxy` — removed
+    - `ServiceContext::outbound_proxies()` — replaced by `outbound_client()` returning `Option<&Arc<OutboundProxyClient>>`
+  - `create_inbound_udp_socket` public function signature changed, added `allow_fragmentation` parameter
+  - `inbound_udp_allow_fragmentation` new configuration option split from `outbound_udp_allow_fragmentation`, which now only controls outbound sockets. The inbound (listener) UDP sockets default to disabling IP fragmentation (`false`).
+
+  ## Features
+
+  - #2106 Allow chaining `ssserver` to another SOCKS5/HTTP/HTTPS proxy
+  - #2109 Expose `user_key()` on `CryptoStream` and `ProxyServerStream`, lets callers identify which multi-user identity was authenticated after an AEAD-2022 handshake
+  - EIH (Extended Identity Header) support
+  - #1994 `local-http`: Support HTTP Basic auth
+  - `service`: Outbound UDP relay through SOCKS5-only chains. UDP traffic can now be relayed through proxy chains when all hops are SOCKS5. Chains containing HTTP/HTTPS hops will emit a startup warning and UDP traffic will bypass the chain.
+  - Optimized `socket2::Socket` with `socket2::SockRef`
+
+  ## Bug Fixes
+
+  - Allow fragmentation for inbound UDP replies
+  - RUSTSEC-2026-0258, RUSTSEC-2026-0204, RUSTSEC-2026-0185, RUSTSEC-2026-0119, RUSTSEC-2026-0104, RUSTSEC-2026-0099
+  - `net`: Make UDP batch configs match the BSD module routing for tvOS/watchOS
+  - #2100 Native build error on arm64
+  - `shadowsocks-service`: Fixed build without `local-http` feature
+  - #2062 `http`: Add `is_ready` method and enhance connection checks
+  - #2097 Unify alpine base version in Docker images
+  - #2093 `PingBalancer`: Remove unnecessary double checks
+  - `netbsd`: Cross-compilation fixes with `getentropy` shim and passthrough `RUSTFLAGS` syntax
+
+  ## Miscellaneous
+
+  - `shadowsocks-crypto` upgraded to v0.8.0
+  - `smoltcp` upgraded to v0.14
+  - Upgraded various dependencies
+
+ -- ty <zonyitoo@gmail.com>  Thu, 27 Aug 2026 12:00:00 +0800
+
+shadowsocks-rust (1.24.0) unstable; urgency=medium
+
+  ## Features
+
+  - #1993, #2044 Support logging to file and syslog
+  - #2026 HTTP Client support auto retry if cached connection was lost
+
+  ## Miscellaneous
+
+  - RUSTSEC-2025-0120, `json5` upgraded to v1.3
+  - MSRV bumps to v1.88
+
+  -- ty <zonyitoo@gmail.com>  Thur, 11 Dec 2025 07:37:00 +0800
+
 shadowsocks-rust (1.23.5) unstable; urgency=medium
 
   ## Features
@@ -426,11 +483,11 @@ shadowsocks-rust (1.15.0) unstable; urgency=medium
 
   - shadowsocks/shadowsocks-org#204 Remove `security-iv-printable-prefix` experimental feature
   - Upgrade [clap](https://crates.io/crates/clap) to v4.0.
-  - UDP association channel size shrinked to 1024, which could save a lot of memory for each associations
+  - UDP association channel size shrunk to 1024, which could save a lot of memory for each associations
 
   ## Enhancements
 
-  - #855 Properly handle IPv4-mapped-IPv6 addresses in UDP assocations
+  - #855 Properly handle IPv4-mapped-IPv6 addresses in UDP associations
       - `ssserver` always convert IPv4-mapped-IPv6 addresses to IPv4 in UDP respond target addresses
       - `sslocal`
           - `tun`, `socks5` always convert IPv4-mapped-IPv6 addresses to IPv4
@@ -462,11 +519,11 @@ shadowsocks-rust (1.14.0) unstable; urgency=medium
 
   ## Features
 
-  - Optimization: UDP associations managment removes unnecessary locks
+  - Optimization: UDP associations management removes unnecessary locks
 
   ## Breaking Changes
 
-  - `shadowsocks_service::local::net::udp::UdpAssociationManager::new` returns clean-up interval and keep-alive receiver. It is not recommended to use this directly in your Project, because the API may change occationally.
+  - `shadowsocks_service::local::net::udp::UdpAssociationManager::new` returns clean-up interval and keep-alive receiver. It is not recommended to use this directly in your Project, because the API may change occasionally.
 
 shadowsocks-rust (1.13.5) unstable; urgency=medium
 
@@ -524,7 +581,7 @@ shadowsocks-rust (1.13.0) unstable; urgency=medium
     - When server start, the "check best" strategy starts after it receives enough data for estimating all servers' scores
   - #744 Refactored `local-tun`, using `smoltcp` as a user-space network stack
 
-  ## Miscelleneous
+  ## Miscellaneous
 
   - Upgrade [`clap`](https://crates.io/crates/clap) (the command-line argument handling library) to v3.0
   - #739 Support K8S deployment
@@ -555,7 +612,7 @@ shadowsocks-rust (1.12.4) unstable; urgency=medium
   - #694 UDP binds to dual-stack address (`::`) will detect `0.0.0.0` already in use automatically
   - Transparent Proxy (redir) local client will always set `IPV6_V6ONLY` for listeners that are listening on `::`
 
-  ## Miscelleneous
+  ## Miscellaneous
 
   - Deprecating `SS_LOG_VERBOSE_LEVEL` and `SS_LOG_WITHOUT_TIME` (introduced in [v1.12.3](https://github.com/shadowsocks/shadowsocks-rust/releases/tag/v1.12.3)) in flavor of configuring in the configuration file
 
@@ -841,7 +898,7 @@ shadowsocks-rust (1.9.0) unstable; urgency=medium
   * Support setting SO_SNDBUF and SO_RCVBUF for TCP sockets
   * Support [SIP008](https://github.com/shadowsocks/shadowsocks-org/issues/89 "Online config") extend server fields server, server_port, remarks
   * Local DNS Relay
-      * Support sending TCP and UDP queries simutaneously
+      * Support sending TCP and UDP queries simultaneously
       * Support connection reusability
   * Remove mostly TCP timeout setting for tunnels, connections will only be killed if clients or servers close
   * Auto-reload DNS resolver configuration from /etc/resolv.conf on *NIX platforms.

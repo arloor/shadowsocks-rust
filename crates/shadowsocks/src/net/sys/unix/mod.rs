@@ -1,12 +1,8 @@
-use std::{
-    io,
-    net::SocketAddr,
-    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd},
-};
+use std::{io, net::SocketAddr, os::fd::AsFd};
 
 use cfg_if::cfg_if;
 use log::warn;
-use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
+use socket2::{Domain, Protocol, SockRef, Socket, TcpKeepalive, Type};
 use tokio::net::UdpSocket;
 
 use crate::net::{AcceptOpts, AddrFamily, ConnectOpts, TcpSocketOpts, is_dual_stack_addr, sys::socket_bind_dual_stack};
@@ -34,7 +30,11 @@ cfg_if! {
 pub mod uds;
 
 /// Create a `UdpSocket` binded to `addr`
-pub async fn create_inbound_udp_socket(addr: &SocketAddr, ipv6_only: bool) -> io::Result<UdpSocket> {
+pub async fn create_inbound_udp_socket(
+    addr: &SocketAddr,
+    ipv6_only: bool,
+    allow_fragmentation: bool,
+) -> io::Result<UdpSocket> {
     let set_dual_stack = is_dual_stack_addr(addr);
 
     let socket = if !set_dual_stack {
@@ -52,7 +52,7 @@ pub async fn create_inbound_udp_socket(addr: &SocketAddr, ipv6_only: bool) -> io
         SocketAddr::V4(..) => AddrFamily::Ipv4,
         SocketAddr::V6(..) => AddrFamily::Ipv6,
     };
-    if let Err(err) = set_disable_ip_fragmentation(addr_family, &socket) {
+    if !allow_fragmentation && let Err(err) = set_disable_ip_fragmentation(addr_family, &socket) {
         warn!("failed to disable IP fragmentation, error: {}", err);
     }
 
@@ -99,14 +99,19 @@ fn set_tcp_keepalive(socket: &Socket, tcp: &TcpSocketOpts) -> io::Result<()> {
 }
 
 #[inline(always)]
-fn socket_call_warp<S: AsRawFd, F: FnOnce(&Socket) -> io::Result<()>>(stream: &S, f: F) -> io::Result<()> {
-    let socket = unsafe { Socket::from_raw_fd(stream.as_raw_fd()) };
-    let result = f(&socket);
-    let _ = socket.into_raw_fd();
-    result
+fn socket_call_warp<S, F>(stream: &S, f: F) -> io::Result<()>
+where
+    S: AsFd,
+    F: FnOnce(&Socket) -> io::Result<()>,
+{
+    let socket = SockRef::from(stream);
+    f(&socket)
 }
 
-pub fn set_common_sockopt_after_connect<S: AsRawFd>(stream: &S, opts: &ConnectOpts) -> io::Result<()> {
+pub fn set_common_sockopt_after_connect<S>(stream: &S, opts: &ConnectOpts) -> io::Result<()>
+where
+    S: AsFd,
+{
     socket_call_warp(stream, |socket| set_common_sockopt_after_connect_impl(socket, opts))
 }
 
@@ -120,7 +125,10 @@ fn set_common_sockopt_after_connect_impl(socket: &Socket, opts: &ConnectOpts) ->
     Ok(())
 }
 
-pub fn set_common_sockopt_after_accept<S: AsRawFd>(stream: &S, opts: &AcceptOpts) -> io::Result<()> {
+pub fn set_common_sockopt_after_accept<S>(stream: &S, opts: &AcceptOpts) -> io::Result<()>
+where
+    S: AsFd,
+{
     socket_call_warp(stream, |socket| set_common_sockopt_after_accept_impl(socket, opts))
 }
 
